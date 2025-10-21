@@ -1,0 +1,89 @@
+name: Reusable Semantic Release
+
+on:
+  workflow_call:
+    inputs:
+      node_version:
+        description: 'Node.js version to use'
+        required: false
+        type: string
+        default: '18'
+      release_branches:
+        description: 'Branches to create releases from (JSON array)'
+        required: false
+        type: string
+        default: '["main", "master"]'
+      dry_run:
+        description: 'Run semantic release in dry-run mode'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      CI_GH_TOKEN:
+        required: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  semantic_release:
+    name: Semantic Release
+    runs-on: ubuntu-latest
+    environment:
+      name: Production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          if [ -f package.json ]; then
+            npm ci
+          else
+            echo "No package.json found, installing semantic-release globally"
+            npm install -g semantic-release @semantic-release/changelog @semantic-release/git
+          fi
+
+      - name: Create semantic-release config if not exists
+        run: |
+          if [ ! -f .releaserc.json ] && [ ! -f .releaserc.yml ] && [ ! -f .releaserc.yaml ] && [ ! -f release.config.js ]; then
+            echo "Creating default semantic-release configuration"
+            cat > .releaserc.json << 'EOF'
+          {
+            "branches": ${{ inputs.release_branches }},
+            "plugins": [
+              "@semantic-release/commit-analyzer",
+              "@semantic-release/release-notes-generator",
+              "@semantic-release/changelog",
+              [
+                "@semantic-release/git",
+                {
+                  "assets": ["CHANGELOG.md"],
+                  "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
+                }
+              ],
+              "@semantic-release/github"
+            ]
+          }
+          EOF
+          fi
+
+      - name: Semantic Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.CI_GH_TOKEN }}
+        run: |
+          if ${{ inputs.dry_run }}; then
+            npx semantic-release --dry-run
+          else
+            npx semantic-release
+          fi

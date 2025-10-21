@@ -1,0 +1,119 @@
+name: Reusable Deploy to Pantheon Multidev
+
+on:
+  workflow_call:
+    inputs:
+      pantheon_site:
+        description: 'Pantheon site name'
+        required: true
+        type: string
+      target_env:
+        description: 'Target environment name'
+        required: true
+        type: string
+      create_multidev:
+        description: 'Whether to create the multidev environment if it does not exist'
+        required: false
+        type: boolean
+        default: true
+      clone_content:
+        description: 'Whether to clone content from live when creating multidev'
+        required: false
+        type: boolean
+        default: false
+      delete_multidev_after:
+        description: 'Delete multidev after deployment (for testing)'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      PANTHEON_SSH_KEY:
+        required: true
+      PANTHEON_MACHINE_TOKEN:
+        required: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  deploy_to_multidev:
+    name: Deploy To Multidev ${{ inputs.target_env }}
+    permissions:
+      deployments: write
+      contents: write
+      pull-requests: read
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Create multidev environment
+      if: ${{ inputs.create_multidev }}
+      env:
+        TERMINUS_MACHINE_TOKEN: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
+      run: |
+        # Check if multidev environment exists
+        if terminus multidev:list ${{ inputs.pantheon_site }} --format=list --field=Name | grep -q "^${{ inputs.target_env }}$"; then
+          echo "Multidev environment ${{ inputs.target_env }} already exists"
+        else
+          echo "Creating multidev environment ${{ inputs.target_env }}"
+          terminus multidev:create ${{ inputs.pantheon_site }}.live ${{ inputs.target_env }} ${{ inputs.clone_content && '--clone-content' || '' }}
+        fi
+
+    - name: Deploy to Pantheon multidev
+      uses: pantheon-systems/push-to-pantheon@0.7.0
+      with:
+        ssh_key: ${{ secrets.PANTHEON_SSH_KEY }}
+        machine_token: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
+        site: ${{ inputs.pantheon_site }}
+        target_env: ${{ inputs.target_env }}
+        git_user_name: ${{ github.event.pull_request.user.login || github.actor }}
+        git_user_email: ${{ github.event.pull_request.user.email || format('{0}@users.noreply.github.com', github.actor) }}
+        git_commit_message: "Automated deployment from GitHub Actions to multidev ${{ inputs.target_env }}"
+        delete_old_environments: false
+        clone_content: ${{ inputs.clone_content }}
+
+    - name: Run config imports and db updates
+      env:
+        TERMINUS_MACHINE_TOKEN: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
+      run: |
+        terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- updb -y
+        terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- cim -y
+        terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- cr -y
+
+    - name: Get multidev URL
+      id: multidev_url
+      env:
+        TERMINUS_MACHINE_TOKEN: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
+      run: |
+        URL=$(terminus env:view ${{ inputs.pantheon_site }}.${{ inputs.target_env }} --print)
+        echo "url=$URL" >> $GITHUB_OUTPUT
+        echo "Multidev environment available at: $URL"
+
+    - name: Comment on PR with multidev URL
+      if: ${{ github.event_name == 'pull_request' }}
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const url = '${{ steps.multidev_url.outputs.url }}';
+          const comment = `🚀 **Multidev Environment Ready!**
+          
+          Your changes have been deployed to: [${url}](${url})
+          
+          Environment: \`${{ inputs.target_env }}\`
+          Site: \`${{ inputs.pantheon_site }}\``;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
+
+    - name: Delete multidev environment
+      if: ${{ inputs.delete_multidev_after }}
+      env:
+        TERMINUS_MACHINE_TOKEN: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
+      run: |
+        echo "Deleting multidev environment ${{ inputs.target_env }}"
+        terminus multidev:delete ${{ inputs.pantheon_site }}.${{ inputs.target_env }} --delete-branch --yes

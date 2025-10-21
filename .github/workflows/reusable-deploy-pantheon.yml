@@ -1,0 +1,122 @@
+name: Reusable Deploy to Pantheon DEV
+
+on:
+  workflow_call:
+    inputs:
+      pantheon_site:
+        description: 'Pantheon site name'
+        required: true
+        type: string
+      target_env:
+        description: 'Target environment (default: dev)'
+        required: false
+        type: string
+        default: 'dev'
+      backup_hours_threshold:
+        description: 'Hours threshold for backup check (default: 6)'
+        required: false
+        type: number
+        default: 6
+      run_semantic_release:
+        description: 'Whether to run semantic release first'
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      PANTHEON_SSH_KEY:
+        required: true
+      PANTHEON_MACHINE_TOKEN:
+        required: true
+      CI_GH_TOKEN:
+        required: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  semantic_release:
+    name: Semantic Release
+    if: ${{ inputs.run_semantic_release }}
+    runs-on: ubuntu-latest
+    environment:
+      name: Production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Semantic Release
+        uses: cycjimmy/semantic-release-action@v4
+        env:
+          GITHUB_TOKEN: ${{ secrets.CI_GH_TOKEN }}
+
+  deploy_to_pantheon:
+    name: Deploy To ${{ inputs.target_env }}
+    needs: semantic_release
+    if: ${{ always() && (needs.semantic_release.result == 'success' || needs.semantic_release.result == 'skipped') }}
+    permissions:
+      deployments: write
+      contents: write
+      pull-requests: read
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: deploy to Pantheon
+      uses: pantheon-systems/push-to-pantheon@0.7.0
+      with:
+        ssh_key: ${{ secrets.PANTHEON_SSH_KEY }}
+        machine_token: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
+        site: ${{ inputs.pantheon_site }}
+        target_env: ${{ inputs.target_env }}
+        git_user_name: ${{ github.event.pull_request.user.login || github.actor }}
+        git_user_email: ${{ github.event.pull_request.user.email || format('{0}@users.noreply.github.com', github.actor) }}
+        git_commit_message: "Automated deployment from GitHub Actions"
+        delete_old_environments: false
+        clone_content: false
+
+    - name: Check for last backup
+      id: last_backup
+      env:
+        TERMINUS_MACHINE_TOKEN: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
+      run: |
+        # Get a list of timestamps
+        last_timestamp=$(terminus backup:info --element database --format list --field date ${{ inputs.pantheon_site }}.live)
+
+        # Get the timestamp from the list element
+        last_epoch="${last_timestamp%%.*}"
+
+        # Get current epoch time
+        current_epoch=$(date +%s)
+
+        # Calculate difference in seconds
+        time_diff=$((current_epoch - last_epoch))
+
+        # Convert hours to seconds
+        hours_calc=$((${{ inputs.backup_hours_threshold }} * 3600))
+
+        # Check if difference is more than threshold
+        if [ $time_diff -gt $hours_calc ]; then
+          echo "The last backup was: $((time_diff / 3600)) hours ago, we need a new one."
+          echo "needs_backup=true" >> $GITHUB_OUTPUT
+        else
+          echo "needs_backup=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Create backup on live
+      if: ${{ steps.last_backup.outputs.needs_backup == 'true' }}
+      env:
+        TERMINUS_MACHINE_TOKEN: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
+      run: |
+        echo "Creating backup on live"
+        terminus -n drush ${{ inputs.pantheon_site }}.live -- cr
+        terminus -n backup:create "${{ inputs.pantheon_site }}.live" --keep-for=30 --no-interaction --quiet --yes
+
+    - name: Run config imports and db updates
+      env:
+        TERMINUS_MACHINE_TOKEN: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
+      run: |
+        terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- updb -y
+        terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- cim -y
+        terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- cr -y
