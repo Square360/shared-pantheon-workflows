@@ -63,6 +63,14 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Install Terminus
+      run: |
+        mkdir -p $HOME/bin
+        curl -L https://github.com/pantheon-systems/terminus/releases/download/3.5.0/terminus.phar -o $HOME/bin/terminus
+        chmod +x $HOME/bin/terminus
+        echo "$HOME/bin" >> $GITHUB_PATH
+        terminus --version
+
     - name: deploy to Pantheon
       uses: pantheon-systems/push-to-pantheon@0.7.0
       with:
