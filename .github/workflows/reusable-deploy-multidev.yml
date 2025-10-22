@@ -70,7 +70,7 @@ jobs:
           const url = '${{ steps.multidev_url.outputs.url }}';
           const comment = `🚀 **Multidev Environment Ready!**
 
-          Your changes have been deployed to: [${url}](${url})
+          Your changes have been deployed to: <a href="${url}" target="_blank">${url}</a>
 
           Environment: \`${{ inputs.target_env }}\`
           Site: \`${{ inputs.pantheon_site }}\``;

@@ -12,7 +12,7 @@ jobs:
     uses: Square360/shared-pantheon-workflows/.github/workflows/reusable-deploy-multidev.yml@main
     with:
       pantheon_site: your-site-name
-      target_env: pr-${{ github.event.number }}
+      target_env: pr-${{ github.event.pull_request.number }}
       create_multidev: true
       clone_content: false
       delete_multidev_after: false
