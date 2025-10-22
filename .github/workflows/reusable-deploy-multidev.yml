@@ -11,21 +11,6 @@ on:
         description: 'Target environment name'
         required: true
         type: string
-      create_multidev:
-        description: 'Whether to create the multidev environment if it does not exist'
-        required: false
-        type: boolean
-        default: true
-      clone_content:
-        description: 'Whether to clone content from live when creating multidev'
-        required: false
-        type: boolean
-        default: false
-      delete_multidev_after:
-        description: 'Delete multidev after deployment (for testing)'
-        required: false
-        type: boolean
-        default: false
     secrets:
       PANTHEON_SSH_KEY:
         required: true
@@ -47,27 +32,6 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install Terminus
-      run: |
-        mkdir -p $HOME/bin
-        curl -L https://github.com/pantheon-systems/terminus/releases/download/3.5.0/terminus.phar -o $HOME/bin/terminus
-        chmod +x $HOME/bin/terminus
-        echo "$HOME/bin" >> $GITHUB_PATH
-        terminus --version
-
-    - name: Create multidev environment
-      if: ${{ inputs.create_multidev }}
-      env:
-        TERMINUS_MACHINE_TOKEN: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
-      run: |
-        # Check if multidev environment exists
-        if terminus multidev:list ${{ inputs.pantheon_site }} --format=list --field=Name | grep -q "^${{ inputs.target_env }}$"; then
-          echo "Multidev environment ${{ inputs.target_env }} already exists"
-        else
-          echo "Creating multidev environment ${{ inputs.target_env }}"
-          terminus multidev:create ${{ inputs.pantheon_site }}.live ${{ inputs.target_env }} ${{ inputs.clone_content && '--clone-content' || '' }}
-        fi
-
     - name: Deploy to Pantheon multidev
       uses: pantheon-systems/push-to-pantheon@0.7.0
       with:
@@ -79,7 +43,15 @@ jobs:
         git_user_email: ${{ github.event.pull_request.user.email || format('{0}@users.noreply.github.com', github.actor) }}
         git_commit_message: "Automated deployment from GitHub Actions to multidev ${{ inputs.target_env }}"
         delete_old_environments: false
-        clone_content: ${{ inputs.clone_content }}
+        clone_content: false
+
+    - name: Install Terminus
+      run: |
+        mkdir -p $HOME/bin
+        curl -L https://github.com/pantheon-systems/terminus/releases/download/3.5.0/terminus.phar -o $HOME/bin/terminus
+        chmod +x $HOME/bin/terminus
+        echo "$HOME/bin" >> $GITHUB_PATH
+        terminus --version
 
     - name: Run config imports and db updates
       env:
@@ -105,23 +77,15 @@ jobs:
         script: |
           const url = '${{ steps.multidev_url.outputs.url }}';
           const comment = `🚀 **Multidev Environment Ready!**
-          
+
           Your changes have been deployed to: [${url}](${url})
-          
+
           Environment: \`${{ inputs.target_env }}\`
           Site: \`${{ inputs.pantheon_site }}\``;
-          
+
           github.rest.issues.createComment({
             issue_number: context.issue.number,
             owner: context.repo.owner,
             repo: context.repo.repo,
             body: comment
           });
-
-    - name: Delete multidev environment
-      if: ${{ inputs.delete_multidev_after }}
-      env:
-        TERMINUS_MACHINE_TOKEN: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
-      run: |
-        echo "Deleting multidev environment ${{ inputs.target_env }}"
-        terminus multidev:delete ${{ inputs.pantheon_site }}.${{ inputs.target_env }} --delete-branch --yes
