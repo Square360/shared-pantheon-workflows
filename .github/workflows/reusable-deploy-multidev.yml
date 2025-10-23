@@ -11,6 +11,14 @@ on:
         description: 'Target environment name'
         required: true
         type: string
+      slack_channel:
+        description: 'Slack channel for notifications (e.g., #deployments)'
+        required: false
+        type: string
+      slack_webhook_url:
+        description: 'Slack webhook URL for notifications'
+        required: false
+        type: string
     secrets:
       PANTHEON_SSH_KEY:
         required: true
@@ -29,6 +37,8 @@ jobs:
       contents: write
       pull-requests: write
     runs-on: ubuntu-latest
+    outputs:
+      multidev_url: ${{ steps.multidev_url.outputs.url }}
     steps:
     - uses: actions/checkout@v4
       with:
@@ -84,3 +94,86 @@ jobs:
             repo: context.repo.repo,
             body: comment
           });
+
+  notify_slack:
+    name: Notify Slack
+    needs: deploy_to_multidev
+    if: ${{ always() && inputs.slack_channel && inputs.slack_webhook_url }}
+    runs-on: ubuntu-latest
+    steps:
+    - name: Send Slack notification
+      run: |
+        # Determine status and message
+        if [[ "${{ needs.deploy_to_multidev.result }}" == "success" ]]; then
+          STATUS_EMOJI=":white_check_mark:"
+          STATUS_COLOR="good"
+          STATUS_TEXT="Success"
+        elif [[ "${{ needs.deploy_to_multidev.result }}" == "failure" ]]; then
+          STATUS_EMOJI=":x:"
+          STATUS_COLOR="danger"
+          STATUS_TEXT="Failed"
+        elif [[ "${{ needs.deploy_to_multidev.result }}" == "cancelled" ]]; then
+          STATUS_EMOJI=":warning:"
+          STATUS_COLOR="warning"
+          STATUS_TEXT="Cancelled"
+        else
+          STATUS_EMOJI=":question:"
+          STATUS_COLOR="#808080"
+          STATUS_TEXT="Unknown"
+        fi
+
+        # Build environment URL field if successful
+        ENV_URL_FIELD=""
+        if [[ "${{ needs.deploy_to_multidev.result }}" == "success" && -n "${{ needs.deploy_to_multidev.outputs.multidev_url }}" ]]; then
+          ENV_URL_FIELD=",{\"title\": \"Multidev URL\", \"value\": \"<${{ needs.deploy_to_multidev.outputs.multidev_url }}|${{ needs.deploy_to_multidev.outputs.multidev_url }}>\", \"short\": false}"
+        fi
+
+        # Add PR link if this is a PR
+        PR_FIELD=""
+        if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+          PR_FIELD=",{\"title\": \"Pull Request\", \"value\": \"<https://github.com/${{ github.repository }}/pull/${{ github.event.number }}|#${{ github.event.number }} - ${{ github.event.pull_request.title }}>\", \"short\": false}"
+        fi
+
+        # Send to Slack
+        curl -X POST -H 'Content-type: application/json' \
+          --data "{
+            \"channel\": \"${{ inputs.slack_channel }}\",
+            \"text\": \"${STATUS_EMOJI} Multidev Deployment ${STATUS_TEXT}\",
+            \"attachments\": [
+              {
+                \"color\": \"${STATUS_COLOR}\",
+                \"fields\": [
+                  {
+                    \"title\": \"Repository\",
+                    \"value\": \"${{ github.repository }}\",
+                    \"short\": true
+                  },
+                  {
+                    \"title\": \"Environment\",
+                    \"value\": \"${{ inputs.target_env }}\",
+                    \"short\": true
+                  },
+                  {
+                    \"title\": \"Site\",
+                    \"value\": \"${{ inputs.pantheon_site }}\",
+                    \"short\": true
+                  },
+                  {
+                    \"title\": \"Status\",
+                    \"value\": \"${STATUS_TEXT}\",
+                    \"short\": true
+                  },
+                  {
+                    \"title\": \"Workflow\",
+                    \"value\": \"<https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Workflow>\",
+                    \"short\": false
+                  }
+                  ${ENV_URL_FIELD}
+                  ${PR_FIELD}
+                ],
+                \"footer\": \"GitHub Actions\",
+                \"ts\": $(date +%s)
+              }
+            ]
+          }" \
+          ${{ inputs.slack_webhook_url }}
