@@ -77,7 +77,8 @@ jobs:
       with:
         # Ensure we checkout the target branch (master/main) for deployment
         ref: ${{ github.event.pull_request.base.ref || github.ref }}
-        fetch-depth: 0
+        # Use shallow clone to let pantheon action handle unshallowing
+        fetch-depth: 1
 
     - name: deploy to Pantheon
       uses: pantheon-systems/push-to-pantheon@0.7.0
