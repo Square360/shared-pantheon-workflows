@@ -49,6 +49,14 @@ jobs:
           # Ensure we checkout the target branch, not the PR branch
           ref: ${{ github.event.pull_request.base.ref || github.ref }}
           fetch-depth: 0
+      - name: Debug GitHub Context
+        run: |
+          echo "Event name: ${{ github.event_name }}"
+          echo "Ref: ${{ github.ref }}"
+          echo "Is PR merged: ${{ github.event.pull_request.merged }}"
+          echo "Base ref: ${{ github.event.pull_request.base.ref }}"
+          echo "Head ref: ${{ github.event.pull_request.head.ref }}"
+
       - name: Semantic Release
         uses: cycjimmy/semantic-release-action@v4
         with:
@@ -59,9 +67,17 @@ jobs:
             @semantic-release/git
         env:
           GITHUB_TOKEN: ${{ secrets.CI_GH_TOKEN }}
-          # Force semantic-release to treat this as a non-PR context
+          # Completely override the CI environment to simulate a push event
+          CI: true
+          CONTINUOUS_INTEGRATION: true
           CI_PULL_REQUEST: ""
           GITHUB_EVENT_NAME: push
+          GITHUB_HEAD_REF: ""
+          GITHUB_BASE_REF: ""
+          # Set the repository and ref to simulate a direct push to the target branch
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF: ${{ github.event.pull_request.base.ref && format('refs/heads/{0}', github.event.pull_request.base.ref) || github.ref }}
+          GITHUB_SHA: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
 
   deploy_to_pantheon:
     name: Deploy To ${{ inputs.target_env }}
