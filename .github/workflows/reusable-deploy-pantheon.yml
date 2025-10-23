@@ -49,35 +49,61 @@ jobs:
           # Ensure we checkout the target branch, not the PR branch
           ref: ${{ github.event.pull_request.base.ref || github.ref }}
           fetch-depth: 0
-      - name: Debug GitHub Context
-        run: |
-          echo "Event name: ${{ github.event_name }}"
-          echo "Ref: ${{ github.ref }}"
-          echo "Is PR merged: ${{ github.event.pull_request.merged }}"
-          echo "Base ref: ${{ github.event.pull_request.base.ref }}"
-          echo "Head ref: ${{ github.event.pull_request.head.ref }}"
-
-      - name: Semantic Release
-        uses: cycjimmy/semantic-release-action@v4
+      - name: Setup Node.js for semantic-release
+        uses: actions/setup-node@v4
         with:
-          # Force semantic-release to run even in PR context since this only runs on merged PRs
-          dry_run: false
-          extra_plugins: |
-            @semantic-release/changelog
-            @semantic-release/git
+          node-version: '18'
+
+      - name: Install semantic-release
+        run: |
+          npm install semantic-release @semantic-release/changelog @semantic-release/git @semantic-release/github @semantic-release/commit-analyzer @semantic-release/release-notes-generator
+
+      - name: Configure Git for semantic-release
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create semantic-release configuration
+        run: |
+          cat > package.json << 'EOF'
+          {
+            "name": "semantic-release-config",
+            "private": true,
+            "release": {
+              "branches": ["master", "main"],
+              "plugins": [
+                "@semantic-release/commit-analyzer",
+                "@semantic-release/release-notes-generator",
+                "@semantic-release/changelog",
+                "@semantic-release/github",
+                [
+                  "@semantic-release/git",
+                  {
+                    "assets": ["CHANGELOG.md"],
+                    "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
+                  }
+                ]
+              ]
+            }
+          }
+          EOF
+
+      - name: Run semantic-release with forced context
+        run: |
+          # Set environment to simulate a push to the target branch
+          export GITHUB_EVENT_NAME=push
+          export GITHUB_REF=refs/heads/${{ github.event.pull_request.base.ref || github.ref_name }}
+          export GITHUB_HEAD_REF=""
+          export GITHUB_BASE_REF=""
+          export CI_PULL_REQUEST=""
+
+          echo "Running semantic-release with simulated push context"
+          echo "Target branch: ${{ github.event.pull_request.base.ref || github.ref_name }}"
+          echo "GitHub ref: $GITHUB_REF"
+
+          npx semantic-release --debug
         env:
           GITHUB_TOKEN: ${{ secrets.CI_GH_TOKEN }}
-          # Completely override the CI environment to simulate a push event
-          CI: true
-          CONTINUOUS_INTEGRATION: true
-          CI_PULL_REQUEST: ""
-          GITHUB_EVENT_NAME: push
-          GITHUB_HEAD_REF: ""
-          GITHUB_BASE_REF: ""
-          # Set the repository and ref to simulate a direct push to the target branch
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_REF: ${{ github.event.pull_request.base.ref && format('refs/heads/{0}', github.event.pull_request.base.ref) || github.ref }}
-          GITHUB_SHA: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
 
   deploy_to_pantheon:
     name: Deploy To ${{ inputs.target_env }}
