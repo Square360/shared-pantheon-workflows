@@ -31,6 +31,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+      with:
+        # Use shallow clone to let pantheon action handle unshallowing
+        fetch-depth: 1
 
     - name: Deploy to Pantheon multidev
       uses: pantheon-systems/push-to-pantheon@0.7.0
