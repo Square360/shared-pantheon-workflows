@@ -26,16 +26,14 @@ on:
         description: 'Slack channel for notifications (e.g., #deployments)'
         required: false
         type: string
-      slack_webhook_url:
-        description: 'Slack webhook URL for notifications'
-        required: false
-        type: string
     secrets:
       PANTHEON_SSH_KEY:
         required: true
       PANTHEON_MACHINE_TOKEN:
         required: true
       CI_GH_TOKEN:
+        required: false
+      SLACK_BOT_TOKEN:
         required: false
 
 defaults:
@@ -202,7 +200,7 @@ jobs:
   notify_slack:
     name: Notify Slack
     needs: [semantic_release, deploy_to_pantheon]
-    if: ${{ always() && inputs.slack_channel && inputs.slack_webhook_url }}
+    if: ${{ always() && inputs.slack_channel }}
     runs-on: ubuntu-latest
     steps:
     - name: Determine deployment status
@@ -232,6 +230,11 @@ jobs:
     - name: Send Slack notification
       if: ${{ always() }}
       run: |
+        # Check if bot token is available
+        if [[ -z "${{ secrets.SLACK_BOT_TOKEN }}" ]]; then
+          echo "No Slack bot token provided, skipping notification"
+          exit 0
+        fi
         # Determine status and message
         if [[ "${{ needs.deploy_to_pantheon.result }}" == "success" ]]; then
           STATUS_EMOJI=":white_check_mark:"
@@ -257,8 +260,9 @@ jobs:
           ENV_URL_FIELD=",{\"title\": \"Environment URL\", \"value\": \"<${{ needs.deploy_to_pantheon.outputs.env_url }}|${{ needs.deploy_to_pantheon.outputs.env_url }}>\", \"short\": false}"
         fi
 
-        # Send to Slack
-        curl -X POST -H 'Content-type: application/json' \
+        # Send to Slack using Web API
+        curl -X POST -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
+          -H 'Content-type: application/json; charset=utf-8' \
           --data "{
             \"channel\": \"${{ inputs.slack_channel }}\",
             \"text\": \"${STATUS_EMOJI} Pantheon Deployment ${STATUS_TEXT}\",
@@ -298,4 +302,4 @@ jobs:
               }
             ]
           }" \
-          ${{ inputs.slack_webhook_url }}
+          https://slack.com/api/chat.postMessage
