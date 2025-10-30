@@ -26,14 +26,16 @@ on:
         description: 'Slack channel for notifications (e.g., #deployments)'
         required: false
         type: string
+      slack_webhook_url:
+        description: 'Slack webhook URL for notifications'
+        required: false
+        type: string
     secrets:
       PANTHEON_SSH_KEY:
         required: true
       PANTHEON_MACHINE_TOKEN:
         required: true
       CI_GH_TOKEN:
-        required: false
-      SLACK_BOT_TOKEN:
         required: false
 
 defaults:
@@ -122,6 +124,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       env_url: ${{ steps.env_url.outputs.url }}
+      error_message: ${{ steps.capture_error.outputs.error_message }}
+      failed_step: ${{ steps.capture_error.outputs.failed_step }}
     steps:
     - uses: actions/checkout@v4
       with:
@@ -131,6 +135,7 @@ jobs:
         fetch-depth: 1
 
     - name: deploy to Pantheon
+      id: deploy_pantheon
       uses: pantheon-systems/push-to-pantheon@0.7.0
       with:
         ssh_key: ${{ secrets.PANTHEON_SSH_KEY }}
@@ -172,6 +177,7 @@ jobs:
         fi
 
     - name: Create backup on live
+      id: create_backup
       if: ${{ steps.last_backup.outputs.needs_backup == 'true' }}
       env:
         TERMINUS_MACHINE_TOKEN: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
@@ -181,6 +187,7 @@ jobs:
         terminus -n backup:create "${{ inputs.pantheon_site }}.live" --keep-for=30 --no-interaction --quiet --yes
 
     - name: Run config imports and db updates
+      id: drush_commands
       env:
         TERMINUS_MACHINE_TOKEN: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
       run: |
@@ -197,10 +204,35 @@ jobs:
         echo "url=$URL" >> $GITHUB_OUTPUT
         echo "Environment available at: $URL"
 
+    - name: Capture error information
+      id: capture_error
+      if: ${{ failure() }}
+      run: |
+        # Determine which step failed and capture relevant error info
+        if [[ "${{ steps.deploy_pantheon.conclusion }}" == "failure" ]]; then
+          echo "failed_step=Pantheon Deployment" >> $GITHUB_OUTPUT
+          echo "error_message=Failed to deploy to Pantheon. Check the deployment logs for details." >> $GITHUB_OUTPUT
+        elif [[ "${{ steps.last_backup.conclusion }}" == "failure" ]]; then
+          echo "failed_step=Backup Check" >> $GITHUB_OUTPUT
+          echo "error_message=Failed to check or create backup on live environment." >> $GITHUB_OUTPUT
+        elif [[ "${{ steps.create_backup.conclusion }}" == "failure" ]]; then
+          echo "failed_step=Backup Creation" >> $GITHUB_OUTPUT
+          echo "error_message=Failed to create backup on live environment." >> $GITHUB_OUTPUT
+        elif [[ "${{ steps.drush_commands.conclusion }}" == "failure" ]]; then
+          echo "failed_step=Drush Commands" >> $GITHUB_OUTPUT
+          echo "error_message=Failed to run database updates, config import, or cache rebuild." >> $GITHUB_OUTPUT
+        elif [[ "${{ steps.env_url.conclusion }}" == "failure" ]]; then
+          echo "failed_step=Environment URL" >> $GITHUB_OUTPUT
+          echo "error_message=Failed to retrieve environment URL from Pantheon." >> $GITHUB_OUTPUT
+        else
+          echo "failed_step=Unknown" >> $GITHUB_OUTPUT
+          echo "error_message=Deployment failed at an unknown step. Check the workflow logs." >> $GITHUB_OUTPUT
+        fi
+
   notify_slack:
     name: Notify Slack
     needs: [semantic_release, deploy_to_pantheon]
-    if: ${{ always() && inputs.slack_channel }}
+    if: ${{ always() && inputs.slack_channel && inputs.slack_webhook_url }}
     runs-on: ubuntu-latest
     steps:
     - name: Determine deployment status
@@ -230,11 +262,6 @@ jobs:
     - name: Send Slack notification
       if: ${{ always() }}
       run: |
-        # Check if bot token is available
-        if [[ -z "${{ secrets.SLACK_BOT_TOKEN }}" ]]; then
-          echo "No Slack bot token provided, skipping notification"
-          exit 0
-        fi
         # Determine status and message
         if [[ "${{ needs.deploy_to_pantheon.result }}" == "success" ]]; then
           STATUS_EMOJI=":white_check_mark:"
@@ -260,9 +287,20 @@ jobs:
           ENV_URL_FIELD=",{\"title\": \"Environment URL\", \"value\": \"<${{ needs.deploy_to_pantheon.outputs.env_url }}|${{ needs.deploy_to_pantheon.outputs.env_url }}>\", \"short\": false}"
         fi
 
-        # Send to Slack using Web API
-        curl -X POST -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
-          -H 'Content-type: application/json; charset=utf-8' \
+        # Add error information if deployment failed
+        ERROR_FIELD=""
+        if [[ "${{ needs.deploy_to_pantheon.result }}" == "failure" ]]; then
+          FAILED_STEP="${{ needs.deploy_to_pantheon.outputs.failed_step }}"
+          ERROR_MSG="${{ needs.deploy_to_pantheon.outputs.error_message }}"
+          if [[ -n "$FAILED_STEP" && -n "$ERROR_MSG" ]]; then
+            ERROR_FIELD=",{\"title\": \"Failed Step\", \"value\": \"${FAILED_STEP}\", \"short\": true},{\"title\": \"Error Details\", \"value\": \"${ERROR_MSG}\", \"short\": false}"
+          else
+            ERROR_FIELD=",{\"title\": \"Error Details\", \"value\": \"Deployment failed. Check the workflow logs for more details.\", \"short\": false}"
+          fi
+        fi
+
+        # Send to Slack
+        curl -X POST -H 'Content-type: application/json' \
           --data "{
             \"channel\": \"${{ inputs.slack_channel }}\",
             \"text\": \"${STATUS_EMOJI} Pantheon Deployment ${STATUS_TEXT}\",
@@ -296,10 +334,11 @@ jobs:
                     \"short\": false
                   }
                   ${ENV_URL_FIELD}
+                  ${ERROR_FIELD}
                 ],
                 \"footer\": \"GitHub Actions\",
                 \"ts\": $(date +%s)
               }
             ]
           }" \
-          https://slack.com/api/chat.postMessage
+          ${{ inputs.slack_webhook_url }}
