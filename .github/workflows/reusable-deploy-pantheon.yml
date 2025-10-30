@@ -293,7 +293,10 @@ jobs:
           FAILED_STEP="${{ needs.deploy_to_pantheon.outputs.failed_step }}"
           ERROR_MSG="${{ needs.deploy_to_pantheon.outputs.error_message }}"
           if [[ -n "$FAILED_STEP" && -n "$ERROR_MSG" ]]; then
-            ERROR_FIELD=",{\"title\": \"Failed Step\", \"value\": \"${FAILED_STEP}\", \"short\": true},{\"title\": \"Error Details\", \"value\": \"${ERROR_MSG}\", \"short\": false}"
+            # Properly escape JSON values using jq
+            FAILED_STEP_ESCAPED=$(echo "$FAILED_STEP" | jq -Rs .)
+            ERROR_MSG_ESCAPED=$(echo "$ERROR_MSG" | jq -Rs .)
+            ERROR_FIELD=",{\"title\": \"Failed Step\", \"value\": ${FAILED_STEP_ESCAPED}, \"short\": true},{\"title\": \"Error Details\", \"value\": ${ERROR_MSG_ESCAPED}, \"short\": false}"
           else
             ERROR_FIELD=",{\"title\": \"Error Details\", \"value\": \"Deployment failed. Check the workflow logs for more details.\", \"short\": false}"
           fi
