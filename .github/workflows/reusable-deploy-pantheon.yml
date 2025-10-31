@@ -26,16 +26,14 @@ on:
         description: 'Slack channel for notifications (e.g., #deployments)'
         required: false
         type: string
-      slack_webhook_url:
-        description: 'Slack webhook URL for notifications'
-        required: false
-        type: string
     secrets:
       PANTHEON_SSH_KEY:
         required: true
       PANTHEON_MACHINE_TOKEN:
         required: true
       CI_GH_TOKEN:
+        required: false
+      SLACK_BOT_TOKEN:
         required: false
 
 defaults:
@@ -232,7 +230,7 @@ jobs:
   notify_slack:
     name: Notify Slack
     needs: [semantic_release, deploy_to_pantheon]
-    if: ${{ always() && inputs.slack_channel && inputs.slack_webhook_url }}
+    if: ${{ always() && inputs.slack_channel }}
     runs-on: ubuntu-latest
     steps:
     - name: Determine deployment status
@@ -302,46 +300,51 @@ jobs:
           fi
         fi
 
-        # Send to Slack
-        curl -X POST -H 'Content-type: application/json' \
-          --data "{
-            \"channel\": \"${{ inputs.slack_channel }}\",
-            \"text\": \"${STATUS_EMOJI} Pantheon Deployment ${STATUS_TEXT}\",
-            \"attachments\": [
-              {
-                \"color\": \"${STATUS_COLOR}\",
-                \"fields\": [
-                  {
-                    \"title\": \"Repository\",
-                    \"value\": \"${{ github.repository }}\",
-                    \"short\": true
-                  },
-                  {
-                    \"title\": \"Environment\",
-                    \"value\": \"${{ inputs.target_env }}\",
-                    \"short\": true
-                  },
-                  {
-                    \"title\": \"Site\",
-                    \"value\": \"${{ inputs.pantheon_site }}\",
-                    \"short\": true
-                  },
-                  {
-                    \"title\": \"Status\",
-                    \"value\": \"${STATUS_TEXT}\",
-                    \"short\": true
-                  },
-                  {
-                    \"title\": \"Workflow\",
-                    \"value\": \"<https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Workflow>\",
-                    \"short\": false
-                  }
-                  ${ENV_URL_FIELD}
-                  ${ERROR_FIELD}
-                ],
-                \"footer\": \"GitHub Actions\",
-                \"ts\": $(date +%s)
-              }
-            ]
-          }" \
-          ${{ inputs.slack_webhook_url }}
+        # Send to Slack using Bot API
+        if [[ -n "${{ secrets.SLACK_BOT_TOKEN }}" ]]; then
+          curl -X POST -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
+            -H 'Content-type: application/json; charset=utf-8' \
+            --data "{
+              \"channel\": \"${{ inputs.slack_channel }}\",
+              \"text\": \"${STATUS_EMOJI} Deployment ${STATUS_TEXT}\",
+              \"attachments\": [
+                {
+                  \"color\": \"${STATUS_COLOR}\",
+                  \"fields\": [
+                    {
+                      \"title\": \"Repository\",
+                      \"value\": \"${{ github.repository }}\",
+                      \"short\": true
+                    },
+                    {
+                      \"title\": \"Environment\",
+                      \"value\": \"${{ inputs.target_env }}\",
+                      \"short\": true
+                    },
+                    {
+                      \"title\": \"Site\",
+                      \"value\": \"${{ inputs.pantheon_site }}\",
+                      \"short\": true
+                    },
+                    {
+                      \"title\": \"Status\",
+                      \"value\": \"${STATUS_TEXT}\",
+                      \"short\": true
+                    },
+                    {
+                      \"title\": \"Workflow\",
+                      \"value\": \"<https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Workflow>\",
+                      \"short\": false
+                    }
+                    ${ENV_URL_FIELD}
+                    ${ERROR_FIELD}
+                  ],
+                  \"footer\": \"GitHub Actions\",
+                  \"ts\": $(date +%s)
+                }
+              ]
+            }" \
+            https://slack.com/api/chat.postMessage
+        else
+          echo "SLACK_BOT_TOKEN not provided, skipping Slack notification"
+        fi
