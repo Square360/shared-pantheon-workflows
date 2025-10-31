@@ -37,6 +37,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       multidev_url: ${{ steps.multidev_url.outputs.url }}
+      error_message: ${{ steps.capture_error.outputs.error_message }}
+      failed_step: ${{ steps.capture_error.outputs.failed_step }}
     steps:
     - uses: actions/checkout@v4
       with:
@@ -44,6 +46,7 @@ jobs:
         fetch-depth: 1
 
     - name: Deploy to Pantheon multidev
+      id: deploy_multidev
       uses: pantheon-systems/push-to-pantheon@0.7.0
       with:
         ssh_key: ${{ secrets.PANTHEON_SSH_KEY }}
@@ -57,6 +60,7 @@ jobs:
         clone_content: false
 
     - name: Run config imports and db updates
+      id: drush_commands
       env:
         TERMINUS_MACHINE_TOKEN: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
       run: |
@@ -93,20 +97,33 @@ jobs:
             body: comment
           });
 
+    - name: Capture error information
+      id: capture_error
+      if: ${{ failure() }}
+      run: |
+        # Determine which step failed and capture relevant error info
+        if [[ "${{ steps.deploy_multidev.conclusion }}" == "failure" ]]; then
+          echo "failed_step=Multidev Deployment" >> $GITHUB_OUTPUT
+          echo "error_message=Failed to deploy to Pantheon multidev environment. Check the deployment logs for details." >> $GITHUB_OUTPUT
+        elif [[ "${{ steps.drush_commands.conclusion }}" == "failure" ]]; then
+          echo "failed_step=Drush Commands" >> $GITHUB_OUTPUT
+          echo "error_message=Failed to run database updates, config import, or cache rebuild on multidev." >> $GITHUB_OUTPUT
+        elif [[ "${{ steps.multidev_url.conclusion }}" == "failure" ]]; then
+          echo "failed_step=Multidev URL" >> $GITHUB_OUTPUT
+          echo "error_message=Failed to retrieve multidev environment URL from Pantheon." >> $GITHUB_OUTPUT
+        else
+          echo "failed_step=Unknown" >> $GITHUB_OUTPUT
+          echo "error_message=Multidev deployment failed at an unknown step. Check the workflow logs." >> $GITHUB_OUTPUT
+        fi
+
   notify_slack:
     name: Notify Slack
-    needs: deploy_to_multidev
+    needs: [deploy_to_multidev]
     if: ${{ always() && inputs.slack_channel }}
     runs-on: ubuntu-latest
     steps:
     - name: Send Slack notification
       run: |
-        # Check if bot token is available
-        if [[ -z "${{ secrets.SLACK_BOT_TOKEN }}" ]]; then
-          echo "No Slack bot token provided, skipping notification"
-          exit 0
-        fi
-        
         # Determine status and message
         if [[ "${{ needs.deploy_to_multidev.result }}" == "success" ]]; then
           STATUS_EMOJI=":white_check_mark:"
@@ -138,47 +155,67 @@ jobs:
           PR_FIELD=",{\"title\": \"Pull Request\", \"value\": \"<https://github.com/${{ github.repository }}/pull/${{ github.event.number }}|#${{ github.event.number }} - ${{ github.event.pull_request.title }}>\", \"short\": false}"
         fi
 
-        # Send to Slack using Web API
-        curl -X POST -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
-          -H 'Content-type: application/json; charset=utf-8' \
-          --data "{
-            \"channel\": \"${{ inputs.slack_channel }}\",
-            \"text\": \"${STATUS_EMOJI} Multidev Deployment ${STATUS_TEXT}\",
-            \"attachments\": [
-              {
-                \"color\": \"${STATUS_COLOR}\",
-                \"fields\": [
-                  {
-                    \"title\": \"Repository\",
-                    \"value\": \"${{ github.repository }}\",
-                    \"short\": true
-                  },
-                  {
-                    \"title\": \"Environment\",
-                    \"value\": \"${{ inputs.target_env }}\",
-                    \"short\": true
-                  },
-                  {
-                    \"title\": \"Site\",
-                    \"value\": \"${{ inputs.pantheon_site }}\",
-                    \"short\": true
-                  },
-                  {
-                    \"title\": \"Status\",
-                    \"value\": \"${STATUS_TEXT}\",
-                    \"short\": true
-                  },
-                  {
-                    \"title\": \"Workflow\",
-                    \"value\": \"<https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Workflow>\",
-                    \"short\": false
-                  }
-                  ${ENV_URL_FIELD}
-                  ${PR_FIELD}
-                ],
-                \"footer\": \"GitHub Actions\",
-                \"ts\": $(date +%s)
-              }
-            ]
-          }" \
-          https://slack.com/api/chat.postMessage
+        # Add error information if deployment failed
+        ERROR_FIELD=""
+        if [[ "${{ needs.deploy_to_multidev.result }}" == "failure" ]]; then
+          FAILED_STEP="${{ needs.deploy_to_multidev.outputs.failed_step }}"
+          ERROR_MSG="${{ needs.deploy_to_multidev.outputs.error_message }}"
+          if [[ -n "$FAILED_STEP" && -n "$ERROR_MSG" ]]; then
+            # Properly escape JSON values using jq
+            FAILED_STEP_ESCAPED=$(echo "$FAILED_STEP" | jq -Rs .)
+            ERROR_MSG_ESCAPED=$(echo "$ERROR_MSG" | jq -Rs .)
+            ERROR_FIELD=",{\"title\": \"Failed Step\", \"value\": ${FAILED_STEP_ESCAPED}, \"short\": true},{\"title\": \"Error Details\", \"value\": ${ERROR_MSG_ESCAPED}, \"short\": false}"
+          else
+            ERROR_FIELD=",{\"title\": \"Error Details\", \"value\": \"Multidev deployment failed. Check the workflow logs for more details.\", \"short\": false}"
+          fi
+        fi
+
+        # Send to Slack using Bot API
+        if [[ -n "${{ secrets.SLACK_BOT_TOKEN }}" ]]; then
+          curl -X POST -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
+            -H 'Content-type: application/json; charset=utf-8' \
+            --data "{
+              \"channel\": \"${{ inputs.slack_channel }}\",
+              \"text\": \"${STATUS_EMOJI} Multidev Deployment ${STATUS_TEXT}\",
+              \"attachments\": [
+                {
+                  \"color\": \"${STATUS_COLOR}\",
+                  \"fields\": [
+                    {
+                      \"title\": \"Repository\",
+                      \"value\": \"${{ github.repository }}\",
+                      \"short\": true
+                    },
+                    {
+                      \"title\": \"Environment\",
+                      \"value\": \"${{ inputs.target_env }}\",
+                      \"short\": true
+                    },
+                    {
+                      \"title\": \"Site\",
+                      \"value\": \"${{ inputs.pantheon_site }}\",
+                      \"short\": true
+                    },
+                    {
+                      \"title\": \"Status\",
+                      \"value\": \"${STATUS_TEXT}\",
+                      \"short\": true
+                    },
+                    {
+                      \"title\": \"Workflow\",
+                      \"value\": \"<https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Workflow>\",
+                      \"short\": false
+                    }
+                    ${ENV_URL_FIELD}
+                    ${PR_FIELD}
+                    ${ERROR_FIELD}
+                  ],
+                  \"footer\": \"GitHub Actions\",
+                  \"ts\": $(date +%s)
+                }
+              ]
+            }" \
+            https://slack.com/api/chat.postMessage
+        else
+          echo "SLACK_BOT_TOKEN not provided, skipping Slack notification"
+        fi
