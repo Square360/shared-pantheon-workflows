@@ -66,13 +66,24 @@ jobs:
               "@semantic-release/release-notes-generator",
               "@semantic-release/changelog",
               [
+                "@semantic-release/github",
+                {
+                  "successComment": false,
+                  "failComment": false,
+                  "failTitle": false,
+                  "labels": false,
+                  "releasedLabels": false,
+                  "addReleases": "bottom",
+                  "assets": false
+                }
+              ],
+              [
                 "@semantic-release/git",
                 {
                   "assets": ["CHANGELOG.md"],
                   "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
                 }
-              ],
-              "@semantic-release/github"
+              ]
             ]
           }
           EOF
