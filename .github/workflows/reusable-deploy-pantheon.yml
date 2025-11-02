@@ -81,7 +81,18 @@ jobs:
                 "@semantic-release/commit-analyzer",
                 "@semantic-release/release-notes-generator",
                 "@semantic-release/changelog",
-                "@semantic-release/github",
+                [
+                  "@semantic-release/github",
+                  {
+                    "successComment": false,
+                    "failComment": false,
+                    "failTitle": false,
+                    "labels": false,
+                    "releasedLabels": false,
+                    "addReleases": "bottom",
+                    "assets": false
+                  }
+                ],
                 [
                   "@semantic-release/git",
                   {
