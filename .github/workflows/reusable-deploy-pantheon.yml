@@ -200,8 +200,20 @@ jobs:
       env:
         TERMINUS_MACHINE_TOKEN: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
       run: |
-        terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- updb -y
-        terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- cim -y
+        # Check commit message for order preference
+        COMMIT_MSG="${{ github.event.head_commit.message || github.event.pull_request.title }}"
+
+        if [[ "$COMMIT_MSG" == *"[config-first]"* ]]; then
+          echo "🔧 Running config import first (detected [config-first] tag)"
+          terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- cim -y
+          terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- updb -y
+        else
+          echo "🔧 Running database update first (default order)"
+          terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- updb -y
+          terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- cim -y
+        fi
+
+        # Always run cache rebuild last
         terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- cr -y
 
     - name: Get environment URL
