@@ -164,7 +164,9 @@ jobs:
         # Add PR link if this is a PR
         PR_FIELD=""
         if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-          PR_FIELD=",{\"title\": \"Pull Request\", \"value\": \"<https://github.com/${{ github.repository }}/pull/${{ github.event.number }}|#${{ github.event.number }} - ${{ github.event.pull_request.title }}>\", \"short\": false}"
+          # Properly escape PR title using jq
+          PR_TITLE_ESCAPED=$(echo '${{ github.event.pull_request.title }}' | jq -Rs .)
+          PR_FIELD=",{\"title\": \"Pull Request\", \"value\": \"<https://github.com/${{ github.repository }}/pull/${{ github.event.number }}|#${{ github.event.number }} - ${PR_TITLE_ESCAPED}>\", \"short\": false}"
         fi
 
         # Add error information if deployment failed
