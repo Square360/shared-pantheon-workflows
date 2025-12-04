@@ -137,10 +137,105 @@ This file tracks the work done together with GitHub Copilot on the Square360 Sha
 
 ---
 
+## 2025-12-03
+
+### Feature Enhancement - Configurable Drush Command Ordering
+
+- **Flexible Config Import and Database Update Ordering**
+  - Added support for controlling the execution order of `drush cim` and `drush updb` commands
+  - **Implementation approach:** Commit message tag-based detection using `[config-first]` flag
+  - **Default behavior:** Database updates run first (`updb -y` → `cim -y` → `cr -y`)
+  - **With [config-first]:** Config import runs first (`cim -y` → `updb -y` → `cr -y`)
+  - **Visual feedback:** Workflow logs display which order is being used with 🔧 emoji indicators
+
+- **Technical Implementation:**
+  - **Priority order:** Checks PR title first, then falls back to commit message
+  - **HERE document approach:** Uses bash HERE document for safe string handling of commit messages
+  - **Pattern matching:** Simple substring matching with `[[ "$COMMIT_MSG" == *"[config-first]"* ]]`
+  - **Cache rebuild:** Always runs last regardless of config-first flag
+
+- **Files Modified:**
+  - `reusable-deploy-multidev.yml`: Added commit message parsing and conditional drush command ordering
+  - `reusable-deploy-pantheon.yml`: Added commit message parsing and conditional drush command ordering
+
+- **Security & Robustness Enhancements:**
+  - **Fixed shell escaping issues:** Resolved bash parsing errors when commit messages contain special characters
+  - **Character handling improvements:**
+    - ✅ Handles double quotes: `feat: Add "Show Documents" functionality`
+    - ✅ Handles apostrophes: `KMHA-1947 - DR | Explore animated gif's in Drupal image library`
+    - ✅ Handles mixed quotes: `fix: Update John's & Mary's contributions`
+    - ✅ Handles backticks and variables: ``chore: Fix `code` blocks and $variables``
+  - **Evolution of escaping approach:**
+    1. **Initial attempt:** Single quotes `COMMIT_MSG='...'` (failed with apostrophes)
+    2. **Second attempt:** Printf command `COMMIT_MSG=$(printf '%s' '...')` (failed with GitHub Actions interpolation timing)
+    3. **Final solution:** HERE document with quoted delimiter prevents all shell expansion
+
+       ```bash
+       read -r -d '' COMMIT_MSG <<'EOF' || true
+       ${{ github.event.pull_request.title || github.event.head_commit.message }}
+       EOF
+       ```
+
+  - **Slack notification fixes:** Applied same escaping pattern to PR title in Slack notifications using `jq -Rs .`
+
+### Bug Fixes
+
+- **Commit Message Parsing Errors:**
+  - **Issue:** Bash syntax errors when commit messages contained quotes or apostrophes
+  - **Example error:** `unexpected EOF while looking for matching ''` with message containing `gif's`
+  - **Root cause:** GitHub Actions interpolates template expressions before bash parses the script
+  - **Solution:** HERE document approach with quoted EOF delimiter prevents premature expansion
+
+- **Slack Notification JSON Injection:**
+  - **Issue:** Shell parsing errors when PR titles contained quotes in Slack notification step
+  - **Example error:** `command not found` when PR title contained `"Show Documents"`
+  - **Solution:** Use `jq -Rs .` to properly escape PR titles before including in JSON payload
+  - **Security benefit:** Prevents potential JSON injection vulnerabilities in Slack messages
+
+### Usage Examples
+
+**Default order (database updates first):**
+
+```text
+PR Title: "Fix styling issues and update content"
+# Runs: updb -y → cim -y → cr -y
+```
+
+**Config-first order:**
+
+```text
+PR Title: "Add new field configs [config-first]"
+# Runs: cim -y → updb -y → cr -y
+```
+
+**Commit message fallback:**
+
+```text
+git commit -m "Update entity types [config-first]"
+# Also works if PR title doesn't contain the tag
+```
+
+### Implementation Technical Details
+
+- **Context priority:** `github.event.pull_request.title` checked before `github.event.head_commit.message`
+- **PR-centric design:** Makes sense for multidev deployments which are typically PR-triggered
+- **Non-invasive:** No additional workflow inputs required, controlled entirely via commit/PR messages
+- **Backward compatible:** Existing workflows without the tag continue with default behavior
+- **Safe parsing:** HERE document approach is bulletproof for special character handling
+
+### Session Context
+
+- **Working Branch:** `fix/config-db-switch`
+- **Session Focus:** Adding flexibility for Drupal deployment command ordering
+- **Implementation Journey:** Multiple iterations to solve shell escaping challenges
+- **Quality Focus:** Ensuring robust handling of real-world commit message edge cases
+
+---
+
 ## Collaboration Notes
 
-**Current Branch**: `fix/slack-notify`
+**Current Branch**: `fix/config-db-switch`
 **Repository**: Square360/shared-pantheon-workflows
-**Focus Areas**: GitHub Actions workflows, Pantheon deployment automation, Slack notifications, error handling
+**Focus Areas**: GitHub Actions workflows, Pantheon deployment automation, Slack notifications, error handling, shell script security
 
-**Key Technologies**: GitHub Actions, Pantheon, Terminus CLI, Drush, Semantic Release, pantheon-systems/push-to-pantheon@0.7.0, Slack webhooks
+**Key Technologies**: GitHub Actions, Pantheon, Terminus CLI, Drush, Semantic Release, pantheon-systems/push-to-pantheon@0.7.0, Slack Bot API, bash HERE documents, jq JSON escaping
