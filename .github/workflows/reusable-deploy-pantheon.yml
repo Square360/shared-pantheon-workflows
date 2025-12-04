@@ -201,8 +201,9 @@ jobs:
         TERMINUS_MACHINE_TOKEN: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
       run: |
         # Check PR title first, then commit message for order preference
-        COMMIT_MSG='${{ github.event.pull_request.title || github.event.head_commit.message }}'
-        
+        # Use printf to safely assign the message and handle quotes/apostrophes
+        COMMIT_MSG=$(printf '%s' '${{ github.event.pull_request.title || github.event.head_commit.message }}')
+
         if [[ "$COMMIT_MSG" == *"[config-first]"* ]]; then
           echo "🔧 Running config import first (detected [config-first] tag)"
           terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- cim -y
@@ -212,7 +213,7 @@ jobs:
           terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- updb -y
           terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- cim -y
         fi
-        
+
         # Always run cache rebuild last
         terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- cr -y
 
