@@ -201,8 +201,10 @@ jobs:
         TERMINUS_MACHINE_TOKEN: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
       run: |
         # Check PR title first, then commit message for order preference
-        # Use printf to safely assign the message and handle quotes/apostrophes
-        COMMIT_MSG=$(printf '%s' '${{ github.event.pull_request.title || github.event.head_commit.message }}')
+        # Use HERE document to safely handle all special characters
+        read -r -d '' COMMIT_MSG <<'EOF' || true
+        ${{ github.event.pull_request.title || github.event.head_commit.message }}
+        EOF
 
         if [[ "$COMMIT_MSG" == *"[config-first]"* ]]; then
           echo "🔧 Running config import first (detected [config-first] tag)"
