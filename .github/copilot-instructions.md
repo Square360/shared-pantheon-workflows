@@ -7,7 +7,7 @@ This file contains specific instructions for GitHub Copilot when working with th
 This repository contains reusable GitHub Actions workflows for deploying Drupal sites to Pantheon hosting platform. The main workflows are:
 
 - `reusable-deploy-pantheon.yml` - Deploys to Pantheon environments with semantic release
-- `reusable-deploy-multidev.yml` - Deploys PRs to Pantheon multidev environments  
+- `reusable-deploy-multidev.yml` - Deploys PRs to Pantheon multidev environments
 - `reusable-semantic-release.yml` - Handles semantic versioning and releases
 
 ## Key Technologies & Dependencies
@@ -104,7 +104,7 @@ Create semantic-release config dynamically if not present:
         "branches": ["master", "main"],
         "plugins": [
           "@semantic-release/commit-analyzer",
-          "@semantic-release/release-notes-generator", 
+          "@semantic-release/release-notes-generator",
           "@semantic-release/changelog",
           "@semantic-release/github",
           [
