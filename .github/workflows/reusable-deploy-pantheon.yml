@@ -45,8 +45,10 @@ jobs:
     name: Semantic Release
     if: ${{ inputs.run_semantic_release }}
     runs-on: ubuntu-latest
-    environment:
-      name: Production
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -107,6 +109,12 @@ jobs:
 
       - name: Run semantic-release with forced context
         run: |
+          # Check if we have a GitHub token
+          if [[ -z "$GITHUB_TOKEN" ]]; then
+            echo "::error::GITHUB_TOKEN is not set. Please provide CI_GH_TOKEN secret or ensure GITHUB_TOKEN has contents:write permission."
+            exit 1
+          fi
+
           # Set environment to simulate a push to the target branch
           export GITHUB_EVENT_NAME=push
           export GITHUB_REF=refs/heads/${{ github.event.pull_request.base.ref || github.ref_name }}
@@ -120,7 +128,7 @@ jobs:
 
           npx semantic-release --debug
         env:
-          GITHUB_TOKEN: ${{ secrets.CI_GH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.CI_GH_TOKEN || github.token }}
 
   deploy_to_pantheon:
     name: Deploy To ${{ inputs.target_env }}
