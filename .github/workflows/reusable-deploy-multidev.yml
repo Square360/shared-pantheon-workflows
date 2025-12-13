@@ -15,6 +15,11 @@ on:
         description: 'Slack channel for notifications (e.g., #deployments)'
         required: false
         type: string
+      workflow_skip_terminus:
+        description: 'Skip post-deployment Terminus commands (database updates, config import, cache rebuild)'
+        required: false
+        type: boolean
+        default: false
     secrets:
       PANTHEON_SSH_KEY:
         required: true
@@ -60,6 +65,7 @@ jobs:
         clone_content: false
 
     - name: Run config imports and db updates
+      if: ${{ !inputs.workflow_skip_terminus }}
       id: drush_commands
       env:
         TERMINUS_MACHINE_TOKEN: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
