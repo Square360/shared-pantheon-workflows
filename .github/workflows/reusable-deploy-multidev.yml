@@ -50,6 +50,33 @@ jobs:
         # Use shallow clone to let pantheon action handle unshallowing
         fetch-depth: 1
 
+    - name: Determine source environment
+      id: source_env
+      env:
+        TERMINUS_MACHINE_TOKEN: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
+      run: |
+        TARGET_ENV="${{ inputs.target_env }}"
+
+        # For pr- multidevs, always use dev
+        if [[ "$TARGET_ENV" == pr-* ]]; then
+          echo "source_env=dev" >> $GITHUB_OUTPUT
+          echo "Using 'dev' as source environment for pr- multidev"
+        # For rc- multidevs, use live if it exists, otherwise dev
+        elif [[ "$TARGET_ENV" == rc-* ]]; then
+          # Check if live environment exists
+          if terminus env:list ${{ inputs.pantheon_site }} --format=list | grep -q "^live$"; then
+            echo "source_env=live" >> $GITHUB_OUTPUT
+            echo "Using 'live' as source environment for rc- multidev"
+          else
+            echo "source_env=dev" >> $GITHUB_OUTPUT
+            echo "'live' environment not found, using 'dev' as source environment"
+          fi
+        # For all other multidevs, default to dev
+        else
+          echo "source_env=dev" >> $GITHUB_OUTPUT
+          echo "Using 'dev' as default source environment"
+        fi
+
     - name: Deploy to Pantheon multidev
       id: deploy_multidev
       uses: pantheon-systems/push-to-pantheon@0.7.0
@@ -58,6 +85,7 @@ jobs:
         machine_token: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
         site: ${{ inputs.pantheon_site }}
         target_env: ${{ inputs.target_env }}
+        source_env: ${{ steps.source_env.outputs.source_env }}
         git_user_name: ${{ github.event.pull_request.user.login || github.actor }}
         git_user_email: ${{ github.event.pull_request.user.email || format('{0}@users.noreply.github.com', github.actor) }}
         git_commit_message: "Automated deployment from GitHub Actions to multidev ${{ inputs.target_env }}"
@@ -75,7 +103,7 @@ jobs:
         read -r -d '' COMMIT_MSG <<'EOF' || true
         ${{ github.event.pull_request.title || github.event.head_commit.message }}
         EOF
-        
+
         if [[ "$COMMIT_MSG" == *"[config-first]"* ]]; then
           echo "🔧 Running config import first (detected [config-first] tag)"
           terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- cim -y
@@ -85,7 +113,7 @@ jobs:
           terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- updb -y
           terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- cim -y
         fi
-        
+
         # Always run cache rebuild last
         terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- cr -y
 
