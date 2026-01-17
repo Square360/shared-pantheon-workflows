@@ -175,12 +175,9 @@ jobs:
       env:
         TERMINUS_MACHINE_TOKEN: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
       run: |
-        # Check if live environment exists
-        if terminus env:info ${{ inputs.pantheon_site }}.live --field=id 2>/dev/null; then
-          echo "Live environment exists, checking for backups..."
-
-          # Get a list of timestamps
-          last_timestamp=$(terminus backup:info --element database --format list --field date ${{ inputs.pantheon_site }}.live)
+        # Try to get backup info - if any error occurs, skip backup creation
+        if last_timestamp=$(terminus backup:info --element database --format list --field date ${{ inputs.pantheon_site }}.live 2>&1); then
+          echo "Successfully retrieved backup information from live environment"
 
           # Get the timestamp from the list element
           last_epoch="${last_timestamp%%.*}"
@@ -202,7 +199,7 @@ jobs:
             echo "needs_backup=false" >> $GITHUB_OUTPUT
           fi
         else
-          echo "Live environment does not exist, skipping backup check."
+          echo "Could not retrieve backup information from live environment (environment may not exist or no backups found). Skipping backup creation."
           echo "needs_backup=false" >> $GITHUB_OUTPUT
         fi
 
