@@ -175,26 +175,34 @@ jobs:
       env:
         TERMINUS_MACHINE_TOKEN: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
       run: |
-        # Get a list of timestamps
-        last_timestamp=$(terminus backup:info --element database --format list --field date ${{ inputs.pantheon_site }}.live)
+        # Check if live environment exists
+        if terminus env:info ${{ inputs.pantheon_site }}.live --field=id 2>/dev/null; then
+          echo "Live environment exists, checking for backups..."
 
-        # Get the timestamp from the list element
-        last_epoch="${last_timestamp%%.*}"
+          # Get a list of timestamps
+          last_timestamp=$(terminus backup:info --element database --format list --field date ${{ inputs.pantheon_site }}.live)
 
-        # Get current epoch time
-        current_epoch=$(date +%s)
+          # Get the timestamp from the list element
+          last_epoch="${last_timestamp%%.*}"
 
-        # Calculate difference in seconds
-        time_diff=$((current_epoch - last_epoch))
+          # Get current epoch time
+          current_epoch=$(date +%s)
 
-        # Convert hours to seconds
-        hours_calc=$((${{ inputs.backup_hours_threshold }} * 3600))
+          # Calculate difference in seconds
+          time_diff=$((current_epoch - last_epoch))
 
-        # Check if difference is more than threshold
-        if [ $time_diff -gt $hours_calc ]; then
-          echo "The last backup was: $((time_diff / 3600)) hours ago, we need a new one."
-          echo "needs_backup=true" >> $GITHUB_OUTPUT
+          # Convert hours to seconds
+          hours_calc=$((${{ inputs.backup_hours_threshold }} * 3600))
+
+          # Check if difference is more than threshold
+          if [ $time_diff -gt $hours_calc ]; then
+            echo "The last backup was: $((time_diff / 3600)) hours ago, we need a new one."
+            echo "needs_backup=true" >> $GITHUB_OUTPUT
+          else
+            echo "needs_backup=false" >> $GITHUB_OUTPUT
+          fi
         else
+          echo "Live environment does not exist, skipping backup check."
           echo "needs_backup=false" >> $GITHUB_OUTPUT
         fi
 
