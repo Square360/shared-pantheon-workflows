@@ -204,7 +204,7 @@ jobs:
           # Properly escape PR title using jq (output is already quoted JSON string)
           PR_TITLE_ESCAPED=$(echo '${{ github.event.pull_request.title }}' | jq -Rs .)
           # Construct JSON field with escaped title (don't add extra quotes)
-          PR_FIELD=",{\"title\": \"Pull Request\", \"value\": \"<https://github.com/${{ github.repository }}/pull/${{ github.event.number }}|#${{ github.event.number }} - \", \"short\": false},{\"title\": \"PR Title\", \"value\": ${PR_TITLE_ESCAPED}, \"short\": false}"
+          PR_FIELD=",{\"title\": \"Pull Request\", \"value\": \"<https://github.com/${{ github.repository }}/pull/${{ github.event.number }}|#${{ github.event.number }}>\", \"short\": false},{\"title\": \"PR Title\", \"value\": ${PR_TITLE_ESCAPED}, \"short\": false}"
         fi
 
         # Add error information if deployment failed
