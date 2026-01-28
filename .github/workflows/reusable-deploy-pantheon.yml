@@ -69,7 +69,7 @@ jobs:
 
       - name: Install semantic-release
         run: |
-          npm install semantic-release @semantic-release/changelog @semantic-release/git @semantic-release/github @semantic-release/commit-analyzer @semantic-release/release-notes-generator conventional-changelog-conventionalcommits
+          npm install semantic-release @semantic-release/changelog @semantic-release/git @semantic-release/github @semantic-release/commit-analyzer @semantic-release/release-notes-generator conventional-changelog-conventionalcommits conventional-changelog-writer@^7.0.0
 
       - name: Configure Git for semantic-release
         run: |
@@ -92,83 +92,89 @@ jobs:
 
       - name: Create semantic-release configuration
         run: |
-          cat > package.json << 'EOF'
-          {
-            "name": "semantic-release-config",
-            "private": true,
-            "release": {
-              "branches": ["master", "main"],
-              "plugins": [
-                [
-                  "@semantic-release/commit-analyzer",
-                  {
-                    "preset": "conventionalcommits",
-                    "releaseRules": [
-                      {"type": "feat", "release": "minor"},
-                      {"type": "fix", "release": "patch"},
-                      {"type": "perf", "release": "patch"},
-                      {"type": "revert", "release": "patch"},
-                      {"type": "docs", "release": false},
-                      {"type": "style", "release": false},
-                      {"type": "chore", "release": "patch"},
-                      {"type": "refactor", "release": "minor"},
-                      {"type": "test", "release": false},
-                      {"type": "build", "release": false},
-                      {"type": "ci", "release": false}
-                    ],
-                    "parserOpts": {
-                      "mergePattern": "^Merge pull request #(\\\\d+) from (.*)$",
-                      "mergeCorrespondence": ["id", "source"]
+          cat > .releaserc.js << 'EOF'
+          module.exports = {
+            branches: ["master", "main"],
+            plugins: [
+              [
+                "@semantic-release/commit-analyzer",
+                {
+                  preset: "conventionalcommits",
+                  releaseRules: [
+                    {type: "feat", release: "minor"},
+                    {type: "fix", release: "patch"},
+                    {type: "perf", release: "patch"},
+                    {type: "revert", release: "patch"},
+                    {type: "docs", release: false},
+                    {type: "style", release: false},
+                    {type: "chore", release: "patch"},
+                    {type: "refactor", release: "minor"},
+                    {type: "test", release: false},
+                    {type: "build", release: false},
+                    {type: "ci", release: false}
+                  ],
+                  parserOpts: {
+                    mergePattern: /^Merge pull request #(\d+) from (.*)$/,
+                    mergeCorrespondence: ["id", "source"]
+                  }
+                }
+              ],
+              [
+                "@semantic-release/release-notes-generator",
+                {
+                  preset: "conventionalcommits",
+                  writerOpts: {
+                    transform: (commit, context) => {
+                      // Fix invalid dates
+                      if (commit.committerDate) {
+                        try {
+                          new Date(commit.committerDate).toISOString();
+                        } catch (e) {
+                          commit.committerDate = new Date().toISOString();
+                        }
+                      }
+                      return commit;
                     }
+                  },
+                  presetConfig: {
+                    types: [
+                      {type: "feat", section: "Features"},
+                      {type: "fix", section: "Bug Fixes"},
+                      {type: "perf", section: "Performance Improvements"},
+                      {type: "revert", section: "Reverts"},
+                      {type: "docs", section: "Documentation"},
+                      {type: "style", section: "Styles"},
+                      {type: "chore", section: "Chores"},
+                      {type: "refactor", section: "Code Refactoring"},
+                      {type: "test", section: "Tests"},
+                      {type: "build", section: "Build System"},
+                      {type: "ci", section: "Continuous Integration"}
+                    ]
                   }
-                ],
-                [
-                  "@semantic-release/release-notes-generator",
-                  {
-                    "preset": "conventionalcommits",
-                    "writerOpts": {
-                      "committerDate": false
-                    },
-                    "presetConfig": {
-                      "types": [
-                        {"type": "feat", "section": "Features"},
-                        {"type": "fix", "section": "Bug Fixes"},
-                        {"type": "perf", "section": "Performance Improvements"},
-                        {"type": "revert", "section": "Reverts"},
-                        {"type": "docs", "section": "Documentation"},
-                        {"type": "style", "section": "Styles"},
-                        {"type": "chore", "section": "Chores"},
-                        {"type": "refactor", "section": "Code Refactoring"},
-                        {"type": "test", "section": "Tests"},
-                        {"type": "build", "section": "Build System"},
-                        {"type": "ci", "section": "Continuous Integration"}
-                      ]
-                    }
-                  }
-                ],
-                "@semantic-release/changelog",
-                [
-                  "@semantic-release/github",
-                  {
-                    "successComment": false,
-                    "failComment": false,
-                    "failTitle": false,
-                    "labels": false,
-                    "releasedLabels": false,
-                    "addReleases": "bottom",
-                    "assets": false
-                  }
-                ],
-                [
-                  "@semantic-release/git",
-                  {
-                    "assets": ["CHANGELOG.md"],
-                    "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
-                  }
-                ]
+                }
+              ],
+              "@semantic-release/changelog",
+              [
+                "@semantic-release/github",
+                {
+                  successComment: false,
+                  failComment: false,
+                  failTitle: false,
+                  labels: false,
+                  releasedLabels: false,
+                  addReleases: "bottom",
+                  assets: false
+                }
+              ],
+              [
+                "@semantic-release/git",
+                {
+                  assets: ["CHANGELOG.md"],
+                  message: "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
+                }
               ]
-            }
-          }
+            ]
+          };
           EOF
 
       - name: Run semantic-release with forced context
