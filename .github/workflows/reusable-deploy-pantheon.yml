@@ -76,6 +76,20 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
+      - name: Validate Git history
+        run: |
+          # Check for commits with invalid dates and log them
+          echo "Checking for commits with invalid timestamps..."
+          git log --all --format='%H %aI %cI' | while read hash author_date commit_date; do
+            if ! date -d "$author_date" >/dev/null 2>&1 && ! date -j -f "%Y-%m-%dT%H:%M:%S%z" "$author_date" >/dev/null 2>&1; then
+              echo "::warning::Commit $hash has invalid author date: $author_date"
+            fi
+            if ! date -d "$commit_date" >/dev/null 2>&1 && ! date -j -f "%Y-%m-%dT%H:%M:%S%z" "$commit_date" >/dev/null 2>&1; then
+              echo "::warning::Commit $hash has invalid commit date: $commit_date"
+            fi
+          done || true
+          echo "Git history validation complete"
+
       - name: Create semantic-release configuration
         run: |
           cat > package.json << 'EOF'
@@ -112,6 +126,9 @@ jobs:
                   "@semantic-release/release-notes-generator",
                   {
                     "preset": "conventionalcommits",
+                    "writerOpts": {
+                      "committerDate": false
+                    },
                     "presetConfig": {
                       "types": [
                         {"type": "feat", "section": "Features"},
