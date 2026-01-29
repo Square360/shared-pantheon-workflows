@@ -231,11 +231,9 @@ jobs:
         echo "========================================"
         echo "Repository: Square360/shared-pantheon-workflows"
         echo "Workflow: reusable-deploy-multidev.yml"
-        echo "Action Path: ${{ github.action_path }}"
-        echo "Action Repository: ${{ github.action_repository }}"
-        echo "Action Ref: ${{ github.action_ref }}"
+        echo "Workflow Ref: ${{ github.workflow_ref }}"
+        echo "Workflow SHA: ${{ github.workflow_sha }}"
         echo "========================================"
-
     - uses: actions/checkout@v4
       with:
         # Ensure we checkout the target branch (master/main) for deployment
