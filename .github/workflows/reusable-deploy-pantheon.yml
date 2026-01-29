@@ -230,7 +230,7 @@ jobs:
         echo "Shared Pantheon Workflows Information"
         echo "========================================"
         echo "Repository: Square360/shared-pantheon-workflows"
-        echo "Workflow: reusable-deploy-multidev.yml"
+        echo "Workflow: reusable-deploy-pantheon.yml"
         echo "Workflow Ref: ${{ github.workflow_ref }}"
         echo "Workflow SHA: ${{ github.workflow_sha }}"
         echo "========================================"
