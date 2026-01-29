@@ -91,7 +91,7 @@ jobs:
 
     - name: Deploy to Pantheon multidev
       id: deploy_multidev
-      uses: pantheon-systems/push-to-pantheon@7.0
+      uses: pantheon-systems/push-to-pantheon@0.7.0
       env:
         COMPOSER_NO_SECURITY_BLOCKING: 1
       with:
