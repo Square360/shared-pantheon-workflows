@@ -229,9 +229,11 @@ jobs:
         echo "========================================"
         echo "Shared Pantheon Workflows Information"
         echo "========================================"
-        echo "Workflow Ref: ${{ github.workflow_ref }}"
-        echo "Workflow SHA: ${{ github.workflow_sha }}"
-        echo "Repository: ${{ github.repository }}"
+        echo "Repository: Square360/shared-pantheon-workflows"
+        echo "Workflow: reusable-deploy-multidev.yml"
+        echo "Action Path: ${{ github.action_path }}"
+        echo "Action Repository: ${{ github.action_repository }}"
+        echo "Action Ref: ${{ github.action_ref }}"
         echo "========================================"
 
     - uses: actions/checkout@v4
@@ -241,11 +243,29 @@ jobs:
         # Use shallow clone to let pantheon action handle unshallowing
         fetch-depth: 1
 
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.3'
+        tools: composer:v2
+
+    - name: Get Composer cache directory
+      id: composer-cache
+      run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+    - name: Cache Composer dependencies
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.composer-cache.outputs.dir }}
+        key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+        restore-keys: ${{ runner.os }}-composer-
+
+    - name: Install Composer dependencies
+      run: composer install --no-dev --optimize-autoloader --no-interaction
+
     - name: deploy to Pantheon
       id: deploy_pantheon
-      uses: pantheon-systems/push-to-pantheon@0.7.0
-      env:
-        COMPOSER_NO_SECURITY_BLOCKING: 1
+      uses: pantheon-systems/push-to-pantheon@0.x
       with:
         ssh_key: ${{ secrets.PANTHEON_SSH_KEY }}
         machine_token: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
