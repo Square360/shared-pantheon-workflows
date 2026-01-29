@@ -55,6 +55,18 @@ jobs:
       issues: write
       pull-requests: write
     steps:
+      - name: Display Workflow Version Information
+        run: |
+          echo "========================================"
+          echo "Shared Pantheon Workflows Information"
+          echo "========================================"
+          echo "Repository: Square360/shared-pantheon-workflows"
+          echo "Workflow: reusable-deploy-pantheon.yml"
+          echo "Action Path: ${{ github.action_path }}"
+          echo "Action Repository: ${{ github.action_repository }}"
+          echo "Action Ref: ${{ github.action_ref }}"
+          echo "========================================"
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -214,6 +226,18 @@ jobs:
       error_message: ${{ steps.capture_error.outputs.error_message }}
       failed_step: ${{ steps.capture_error.outputs.failed_step }}
     steps:
+    - name: Display Workflow Version Information
+      run: |
+        echo "========================================"
+        echo "Shared Pantheon Workflows Information"
+        echo "========================================"
+        echo "Repository: Square360/shared-pantheon-workflows"
+        echo "Workflow: reusable-deploy-pantheon.yml"
+        echo "Action Path: ${{ github.action_path }}"
+        echo "Action Repository: ${{ github.action_repository }}"
+        echo "Action Ref: ${{ github.action_ref }}"
+        echo "========================================"
+
     - uses: actions/checkout@v4
       with:
         # Ensure we checkout the target branch (master/main) for deployment
@@ -223,7 +247,7 @@ jobs:
 
     - name: deploy to Pantheon
       id: deploy_pantheon
-      uses: pantheon-systems/push-to-pantheon@0.7.0
+      uses: pantheon-systems/push-to-pantheon@0.x
       with:
         ssh_key: ${{ secrets.PANTHEON_SSH_KEY }}
         machine_token: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
