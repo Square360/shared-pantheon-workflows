@@ -89,9 +89,29 @@ jobs:
           echo "Using 'dev' as default source environment"
         fi
 
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.3'
+        tools: composer:v2
+
+    - name: Get Composer cache directory
+      id: composer-cache
+      run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+    - name: Cache Composer dependencies
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.composer-cache.outputs.dir }}
+        key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+        restore-keys: ${{ runner.os }}-composer-
+
+    - name: Install Composer dependencies
+      run: composer install --no-dev --optimize-autoloader --no-interaction
+
     - name: Deploy to Pantheon multidev
       id: deploy_multidev
-      uses: pantheon-systems/push-to-pantheon@0.7.0
+      uses: pantheon-systems/push-to-pantheon@0.x
       env:
         COMPOSER_NO_SECURITY_BLOCKING: 1
       with:
