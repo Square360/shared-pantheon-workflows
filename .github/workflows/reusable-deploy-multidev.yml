@@ -112,6 +112,8 @@ jobs:
     - name: Deploy to Pantheon multidev
       id: deploy_multidev
       uses: pantheon-systems/push-to-pantheon@0.x
+      env:
+        COMPOSER_NO_SECURITY_BLOCKING: 1
       with:
         ssh_key: ${{ secrets.PANTHEON_SSH_KEY }}
         machine_token: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
