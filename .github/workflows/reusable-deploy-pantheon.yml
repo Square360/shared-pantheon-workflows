@@ -224,16 +224,6 @@ jobs:
       error_message: ${{ steps.capture_error.outputs.error_message }}
       failed_step: ${{ steps.capture_error.outputs.failed_step }}
     steps:
-    - name: Display Workflow Version Information
-      run: |
-        echo "========================================"
-        echo "Shared Pantheon Workflows Information"
-        echo "========================================"
-        echo "Repository: ${{ github.repository }}"
-        echo "Workflow: reusable-deploy-pantheon.yml"
-        echo "Workflow Ref: ${{ github.workflow_ref }}"
-        echo "Workflow SHA: ${{ github.workflow_sha }}"
-        echo "========================================"
     - uses: actions/checkout@v4
       with:
         # Ensure we checkout the target branch (master/main) for deployment
@@ -264,6 +254,8 @@ jobs:
     - name: deploy to Pantheon
       id: deploy_pantheon
       uses: pantheon-systems/push-to-pantheon@0.x
+      env:
+        COMPOSER_NO_SECURITY_BLOCKING: 1
       with:
         ssh_key: ${{ secrets.PANTHEON_SSH_KEY }}
         machine_token: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
