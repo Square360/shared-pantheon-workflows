@@ -274,7 +274,6 @@ jobs:
         git_commit_message: "Automated deployment from GitHub Actions"
         delete_old_environments: false
         clone_content: false
-        build_tools_version: "3.0.11"
 
     - name: Check for last backup
       id: last_backup
