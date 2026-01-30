@@ -50,11 +50,10 @@ jobs:
         echo "========================================"
         echo "Shared Pantheon Workflows Information"
         echo "========================================"
-        echo "Repository: Square360/shared-pantheon-workflows"
-        echo "Workflow: reusable-deploy-multidev.yml"
-        echo "Action Path: ${{ github.action_path }}"
-        echo "Action Repository: ${{ github.action_repository }}"
-        echo "Action Ref: ${{ github.action_ref }}"
+        echo "Repository: ${{ github.repository }}"
+        echo "Workflow: ${{ github.workflow }}"
+        echo "Workflow Ref: ${{ github.ref }}"
+        echo "Workflow SHA: ${{ github.sha }}"
         echo "========================================"
 
     - uses: actions/checkout@v4
