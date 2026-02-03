@@ -51,41 +51,79 @@ jobs:
             npm ci
           else
             echo "No package.json found, installing semantic-release globally"
-            npm install -g semantic-release @semantic-release/changelog @semantic-release/git conventional-changelog-conventionalcommits
+            npm install -g semantic-release @semantic-release/changelog @semantic-release/git @semantic-release/github @semantic-release/commit-analyzer @semantic-release/release-notes-generator conventional-changelog-conventionalcommits
           fi
 
       - name: Create semantic-release config if not exists
         run: |
-          if [ ! -f .releaserc.json ] && [ ! -f .releaserc.yml ] && [ ! -f .releaserc.yaml ] && [ ! -f release.config.js ]; then
+          if [ ! -f .releaserc.json ] && [ ! -f .releaserc.yml ] && [ ! -f .releaserc.yaml ] && [ ! -f release.config.js ] && [ ! -f .releaserc.js ]; then
             echo "Creating default semantic-release configuration"
-            cat > .releaserc.json << 'EOF'
-          {
-            "branches": ${{ inputs.release_branches }},
-            "plugins": [
-              "@semantic-release/commit-analyzer",
-              "@semantic-release/release-notes-generator",
+            cat > .releaserc.js << 'EOF'
+          module.exports = {
+            branches: ${{ inputs.release_branches }},
+            plugins: [
+              [
+                "@semantic-release/commit-analyzer",
+                {
+                  preset: "conventionalcommits",
+                  releaseRules: [
+                    {type: "feat", release: "minor"},
+                    {type: "fix", release: "patch"},
+                    {type: "perf", release: "patch"},
+                    {type: "revert", release: "patch"},
+                    {type: "docs", release: false},
+                    {type: "style", release: false},
+                    {type: "chore", release: "patch"},
+                    {type: "refactor", release: "minor"},
+                    {type: "test", release: false},
+                    {type: "build", release: false},
+                    {type: "ci", release: false}
+                  ]
+                }
+              ],
+              [
+                "@semantic-release/release-notes-generator",
+                {
+                  preset: "conventionalcommits",
+                  presetConfig: {
+                    types: [
+                      {type: "feat", section: "Features"},
+                      {type: "fix", section: "Bug Fixes"},
+                      {type: "perf", section: "Performance Improvements"},
+                      {type: "revert", section: "Reverts"},
+                      {type: "docs", section: "Documentation"},
+                      {type: "style", section: "Styles"},
+                      {type: "chore", section: "Chores"},
+                      {type: "refactor", section: "Code Refactoring"},
+                      {type: "test", section: "Tests"},
+                      {type: "build", section: "Build System"},
+                      {type: "ci", section: "Continuous Integration"}
+                    ]
+                  }
+                }
+              ],
               "@semantic-release/changelog",
               [
                 "@semantic-release/github",
                 {
-                  "successComment": false,
-                  "failComment": false,
-                  "failTitle": false,
-                  "labels": false,
-                  "releasedLabels": false,
-                  "addReleases": "bottom",
-                  "assets": false
+                  successComment: false,
+                  failComment: false,
+                  failTitle: false,
+                  labels: false,
+                  releasedLabels: false,
+                  addReleases: "bottom",
+                  assets: false
                 }
               ],
               [
                 "@semantic-release/git",
                 {
-                  "assets": ["CHANGELOG.md"],
-                  "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
+                  assets: ["CHANGELOG.md"],
+                  message: "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
                 }
               ]
             ]
-          }
+          };
           EOF
           fi
 

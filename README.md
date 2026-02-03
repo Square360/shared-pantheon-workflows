@@ -66,6 +66,62 @@ Each project using these workflows needs these secrets configured:
 ### 3. Required Variables
 - `PANTHEON_SITE`: Your Pantheon site name
 
+## Semantic Release Configuration
+
+These workflows use [semantic-release](https://semantic-release.gitbook.io/) to automatically determine version numbers and generate release notes based on commit messages.
+
+### Supported Commit Types
+
+The workflows are configured to include **all** commit types in release notes, organized into sections:
+
+| Commit Type | Section in Release Notes | Triggers Version Bump |
+|-------------|-------------------------|----------------------|
+| `feat` | Features | Minor (1.x.0) |
+| `fix` | Bug Fixes | Patch (1.0.x) |
+| `perf` | Performance Improvements | Patch (1.0.x) |
+| `revert` | Reverts | Patch (1.0.x) |
+| `refactor` | Code Refactoring | Minor (1.x.0) |
+| `chore` | Chores | Patch (1.0.x) |
+| `docs` | Documentation | No version bump |
+| `style` | Styles | No version bump |
+| `test` | Tests | No version bump |
+| `build` | Build System | No version bump |
+| `ci` | Continuous Integration | No version bump |
+
+### Commit Message Format
+
+Follow the [Conventional Commits](https://www.conventionalcommits.org/) specification:
+
+```
+<type>(<scope>): <subject>
+
+<body>
+
+<footer>
+```
+
+**Examples:**
+- `feat(auth): add JWT authentication`
+- `fix(api): resolve null pointer exception in user endpoint`
+- `chore(deps): update drupal core to 10.2.0`
+- `docs(readme): update deployment instructions`
+
+### Breaking Changes
+
+To trigger a major version bump (x.0.0), add `BREAKING CHANGE:` in the commit footer:
+
+```
+feat(api): change user endpoint response format
+
+BREAKING CHANGE: The user endpoint now returns an array instead of an object
+```
+
+Or use the `!` notation:
+
+```
+feat!: change API response format
+```
+
 ## Versioning
 
 We recommend pinning to specific versions for production use:
