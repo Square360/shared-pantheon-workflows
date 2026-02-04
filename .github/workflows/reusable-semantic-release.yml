@@ -137,8 +137,7 @@ jobs:
                   failTitle: false,
                   labels: false,
                   releasedLabels: false,
-                  addReleases: "bottom",
-                  assets: false
+                  addReleases: "bottom"
                 }
               ],
               [
