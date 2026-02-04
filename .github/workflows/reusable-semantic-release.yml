@@ -87,16 +87,10 @@ jobs:
                 {
                   preset: "conventionalcommits",
                   writerOpts: {
-                    transform: (commit, context) => {
-                      // Skip commits with invalid dates to prevent crash
-                      if (commit.committerDate && isNaN(new Date(commit.committerDate).getTime())) {
-                        commit.committerDate = new Date().toISOString();
-                      }
-                      if (commit.authorDate && isNaN(new Date(commit.authorDate).getTime())) {
-                        commit.authorDate = new Date().toISOString();
-                      }
-                      return commit;
-                    }
+                    committerDate: false,
+                    commitGroupsSort: "title",
+                    commitsSort: ["scope", "subject"],
+                    noteGroupsSort: "title"
                   },
                   presetConfig: {
                     types: [
@@ -139,6 +133,19 @@ jobs:
           };
           EOF
           fi
+
+      - name: Validate git history
+        run: |
+          # Check for commits with invalid dates and log them
+          echo "Checking for commits with invalid dates..."
+          git log --all --pretty=format:"%H %aI %cI" | while read hash author_date committer_date; do
+            if ! date -d "$author_date" &>/dev/null 2>&1 && ! date -jf "%Y-%m-%dT%H:%M:%S%z" "$author_date" &>/dev/null 2>&1; then
+              echo "Warning: Commit $hash has invalid author date: $author_date"
+            fi
+            if ! date -d "$committer_date" &>/dev/null 2>&1 && ! date -jf "%Y-%m-%dT%H:%M:%S%z" "$committer_date" &>/dev/null 2>&1; then
+              echo "Warning: Commit $hash has invalid committer date: $committer_date"
+            fi
+          done || true
 
       - name: Semantic Release
         run: |
