@@ -131,6 +131,11 @@ jobs:
       - name: Semantic Release
         env:
           GITHUB_TOKEN: ${{ secrets.CI_GH_TOKEN }}
+          # Force semantic-release to run in push context even when triggered by PR
+          GITHUB_EVENT_NAME: push
+          GITHUB_REF: refs/heads/${{ github.event.pull_request.base.ref || github.ref_name }}
+          GITHUB_HEAD_REF: ""
+          GITHUB_BASE_REF: ""
         run: |
           if ${{ inputs.dry_run }}; then
             npx semantic-release --dry-run
