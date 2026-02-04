@@ -52,7 +52,7 @@ jobs:
             npm ci
           else
             echo "No package.json found, installing semantic-release globally"
-            npm install -g semantic-release @semantic-release/changelog @semantic-release/git @semantic-release/github @semantic-release/commit-analyzer @semantic-release/release-notes-generator conventional-changelog-conventionalcommits
+            npm install -g semantic-release @semantic-release/changelog @semantic-release/git @semantic-release/github @semantic-release/commit-analyzer @semantic-release/release-notes-generator conventional-changelog-conventionalcommits@^8.0.0
           fi
 
       - name: Create semantic-release config if not exists
