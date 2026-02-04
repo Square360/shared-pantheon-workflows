@@ -246,22 +246,37 @@ jobs:
       if: ${{ always() }}
       run: |
         # Determine status and message
-        if [[ "${{ needs.deploy_to_pantheon.result }}" == "success" ]]; then
+        # Check semantic release first, as deploy may be skipped if it fails
+        if [[ "${{ needs.semantic_release.result }}" == "failure" ]]; then
+          STATUS_EMOJI=":x:"
+          STATUS_COLOR="danger"
+          STATUS_TEXT="Failed"
+          PHASE="Semantic Release"
+        elif [[ "${{ needs.deploy_to_pantheon.result }}" == "success" ]]; then
           STATUS_EMOJI=":white_check_mark:"
           STATUS_COLOR="good"
           STATUS_TEXT="Success"
+          PHASE="Deployment"
         elif [[ "${{ needs.deploy_to_pantheon.result }}" == "failure" ]]; then
           STATUS_EMOJI=":x:"
           STATUS_COLOR="danger"
           STATUS_TEXT="Failed"
+          PHASE="Deployment"
         elif [[ "${{ needs.deploy_to_pantheon.result }}" == "cancelled" ]]; then
           STATUS_EMOJI=":warning:"
           STATUS_COLOR="warning"
           STATUS_TEXT="Cancelled"
+          PHASE="Deployment"
+        elif [[ "${{ needs.semantic_release.result }}" == "cancelled" ]]; then
+          STATUS_EMOJI=":warning:"
+          STATUS_COLOR="warning"
+          STATUS_TEXT="Cancelled"
+          PHASE="Semantic Release"
         else
           STATUS_EMOJI=":question:"
           STATUS_COLOR="#808080"
           STATUS_TEXT="Unknown"
+          PHASE="Unknown"
         fi
 
         # Build the message
@@ -283,6 +298,8 @@ jobs:
           else
             ERROR_FIELD=",{\"title\": \"Error Details\", \"value\": \"Deployment failed. Check the workflow logs for more details.\", \"short\": false}"
           fi
+        elif [[ "${{ needs.semantic_release.result }}" == "failure" ]]; then
+          ERROR_FIELD=",{\"title\": \"Error Details\", \"value\": \"Semantic release failed. Deployment was not attempted. Check the workflow logs for more details.\", \"short\": false}"
         fi
 
         # Send to Slack using Bot API
@@ -314,6 +331,11 @@ jobs:
                     {
                       \"title\": \"Status\",
                       \"value\": \"${STATUS_TEXT}\",
+                      \"short\": true
+                    },
+                    {
+                      \"title\": \"Phase\",
+                      \"value\": \"${PHASE}\",
                       \"short\": true
                     },
                     {
