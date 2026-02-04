@@ -87,10 +87,9 @@ jobs:
                 {
                   preset: "conventionalcommits",
                   writerOpts: {
-                    committerDate: false,
-                    commitGroupsSort: "title",
-                    commitsSort: ["scope", "subject"],
-                    noteGroupsSort: "title"
+                    headerPartial: "",
+                    commitPartial: "* {{#if scope}}**{{scope}}:** {{/if}}{{subject}} ([{{hash}}]({{commitUrlFormat}}))\n",
+                    footerPartial: ""
                   },
                   presetConfig: {
                     types: [
