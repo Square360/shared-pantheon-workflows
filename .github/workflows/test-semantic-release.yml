@@ -2,114 +2,22 @@ name: Test Semantic Release Configuration
 
 on:
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run in dry-run mode (no actual release)'
+        required: false
+        type: boolean
+        default: true
   push:
     branches:
-      - fix/config-db-switch
+      - main
 
 jobs:
   test_semantic_release:
     name: Test Semantic Release
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+    uses: ./.github/workflows/reusable-semantic-release.yml
+    with:
+      dry_run: ${{ inputs.dry_run || true }}
+    secrets:
+      CI_GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-
-      - name: Install semantic-release
-        run: |
-          npm install semantic-release @semantic-release/changelog @semantic-release/git @semantic-release/github @semantic-release/commit-analyzer @semantic-release/release-notes-generator conventional-changelog-conventionalcommits
-
-      - name: Configure Git
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Create test semantic-release configuration
-        run: |
-          cat > package.json << 'EOF'
-          {
-            "name": "semantic-release-config",
-            "private": true,
-            "release": {
-              "branches": ["main", "fix/config-db-switch"],
-              "plugins": [
-                [
-                  "@semantic-release/commit-analyzer",
-                  {
-                    "preset": "conventionalcommits",
-                    "releaseRules": [
-                      {"type": "feat", "release": "minor"},
-                      {"type": "fix", "release": "patch"},
-                      {"type": "perf", "release": "patch"},
-                      {"type": "revert", "release": "patch"},
-                      {"type": "docs", "release": false},
-                      {"type": "style", "release": false},
-                      {"type": "chore", "release": false},
-                      {"type": "refactor", "release": false},
-                      {"type": "test", "release": false},
-                      {"type": "build", "release": false},
-                      {"type": "ci", "release": false}
-                    ],
-                    "parserOpts": {
-                      "mergePattern": "^Merge pull request #(\\\\d+) from (.*)$",
-                      "mergeCorrespondence": ["id", "source"]
-                    }
-                  }
-                ],
-                [
-                  "@semantic-release/release-notes-generator",
-                  {
-                    "preset": "conventionalcommits",
-                    "presetConfig": {
-                      "types": [
-                        {"type": "feat", "section": "Features"},
-                        {"type": "fix", "section": "Bug Fixes"},
-                        {"type": "perf", "section": "Performance Improvements"},
-                        {"type": "revert", "section": "Reverts"},
-                        {"type": "docs", "section": "Documentation"},
-                        {"type": "style", "section": "Styles"},
-                        {"type": "chore", "section": "Chores"},
-                        {"type": "refactor", "section": "Code Refactoring"},
-                        {"type": "test", "section": "Tests"},
-                        {"type": "build", "section": "Build System"},
-                        {"type": "ci", "section": "Continuous Integration"}
-                      ]
-                    }
-                  }
-                ],
-                "@semantic-release/changelog",
-                [
-                  "@semantic-release/github",
-                  {
-                    "successComment": false
-                  }
-                ]
-              ]
-            }
-          }
-          EOF
-
-      - name: Run semantic-release in dry-run mode
-        run: |
-          npx semantic-release --dry-run --debug
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Show what would be released
-        if: always()
-        run: |
-          echo "Check the logs above to see:"
-          echo "- Which commits were analyzed"
-          echo "- What release type was determined"
-          echo "- What would be in the release notes"
-          echo "- All commit types that were recognized"

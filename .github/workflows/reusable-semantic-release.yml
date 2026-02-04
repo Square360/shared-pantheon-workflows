@@ -87,7 +87,16 @@ jobs:
                 {
                   preset: "conventionalcommits",
                   writerOpts: {
-                    committerDate: false
+                    transform: (commit, context) => {
+                      // Skip commits with invalid dates to prevent crash
+                      if (commit.committerDate && isNaN(new Date(commit.committerDate).getTime())) {
+                        commit.committerDate = new Date().toISOString();
+                      }
+                      if (commit.authorDate && isNaN(new Date(commit.authorDate).getTime())) {
+                        commit.authorDate = new Date().toISOString();
+                      }
+                      return commit;
+                    }
                   },
                   presetConfig: {
                     types: [
