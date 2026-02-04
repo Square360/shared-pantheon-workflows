@@ -59,50 +59,51 @@ jobs:
         run: |
           if [ ! -f .releaserc.json ] && [ ! -f .releaserc.yml ] && [ ! -f .releaserc.yaml ] && [ ! -f release.config.js ] && [ ! -f .releaserc.js ]; then
             echo "Creating default semantic-release configuration"
-            
+
             # Create custom release notes generator to avoid date formatting issues
-            cat > custom-release-notes.js << 'EOJS'
-          module.exports = async (pluginConfig, context) => {
-            const commits = context.commits;
-            const compareUrl = context.compareUrl;
-            
-            const types = {
-              feat: 'Features',
-              fix: 'Bug Fixes',
-              perf: 'Performance Improvements',
-              revert: 'Reverts',
-              docs: 'Documentation',
-              style: 'Styles',
-              chore: 'Chores',
-              refactor: 'Code Refactoring',
-              test: 'Tests',
-              build: 'Build System',
-              ci: 'Continuous Integration'
-            };
-            
-            const grouped = {};
-            commits.forEach(commit => {
-              const type = commit.type || 'other';
-              if (!grouped[type]) grouped[type] = [];
-              grouped[type].push(commit);
-            });
-            
-            let notes = '';
-            Object.keys(types).forEach(type => {
-              if (grouped[type]) {
-                notes += `\\n### ${types[type]}\\n\\n`;
-                grouped[type].forEach(commit => {
-                  const scope = commit.scope ? `**${commit.scope}:** ` : '';
-                  const hash = commit.hash.substring(0, 7);
-                  notes += `* ${scope}${commit.subject} ([${hash}](${context.repositoryUrl}/commit/${commit.hash}))\\n`;
-                });
-              }
-            });
-            
-            return notes;
+            cat > custom-release-notes.cjs << 'EOJS'
+          module.exports = {
+            generateNotes: async (pluginConfig, context) => {
+              const commits = context.commits;
+
+              const types = {
+                feat: 'Features',
+                fix: 'Bug Fixes',
+                perf: 'Performance Improvements',
+                revert: 'Reverts',
+                docs: 'Documentation',
+                style: 'Styles',
+                chore: 'Chores',
+                refactor: 'Code Refactoring',
+                test: 'Tests',
+                build: 'Build System',
+                ci: 'Continuous Integration'
+              };
+
+              const grouped = {};
+              commits.forEach(commit => {
+                const type = commit.type || 'other';
+                if (!grouped[type]) grouped[type] = [];
+                grouped[type].push(commit);
+              });
+
+              let notes = '';
+              Object.keys(types).forEach(type => {
+                if (grouped[type]) {
+                  notes += `\\n### ${types[type]}\\n\\n`;
+                  grouped[type].forEach(commit => {
+                    const scope = commit.scope ? `**${commit.scope}:** ` : '';
+                    const hash = commit.hash.substring(0, 7);
+                    notes += `* ${scope}${commit.subject} ([${hash}](${context.repositoryUrl}/commit/${commit.hash}))\\n`;
+                  });
+                }
+              });
+
+              return notes;
+            }
           };
           EOJS
-            
+
             cat > .releaserc.js << 'EOF'
           module.exports = {
             branches: ${{ inputs.release_branches }},
@@ -126,7 +127,7 @@ jobs:
                   ]
                 }
               ],
-              "./custom-release-notes.js",
+              "./custom-release-notes.cjs",
               "@semantic-release/changelog",
               [
                 "@semantic-release/github",
