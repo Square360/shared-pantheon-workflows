@@ -36,6 +36,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          # Checkout target branch (master/main) to analyze all commits since last release
+          ref: ${{ github.event.pull_request.base.ref || github.ref }}
           fetch-depth: 0
           persist-credentials: false
 
