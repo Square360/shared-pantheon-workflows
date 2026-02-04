@@ -7,7 +7,7 @@ on:
         description: 'Run in dry-run mode (no actual release)'
         required: false
         type: boolean
-        default: true
+        default: false
   push:
     branches:
       - main
@@ -17,7 +17,7 @@ jobs:
     name: Test Semantic Release
     uses: ./.github/workflows/reusable-semantic-release.yml
     with:
-      dry_run: ${{ inputs.dry_run || true }}
+      dry_run: ${{ inputs.dry_run || false }}
     secrets:
       CI_GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
