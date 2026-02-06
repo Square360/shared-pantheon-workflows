@@ -88,18 +88,21 @@ jobs:
               });
 
               let notes = '';
+              
+              // Process types in order
               Object.keys(types).forEach(type => {
-                if (grouped[type]) {
-                  notes += `\\n### ${types[type]}\\n\\n`;
+                if (grouped[type] && grouped[type].length > 0) {
+                  notes += `### ${types[type]}\\n\\n`;
                   grouped[type].forEach(commit => {
-                    const scope = commit.scope ? `**${commit.scope}:** ` : '';
+                    const scope = commit.scope ? `${commit.scope}: ` : '';
                     const hash = commit.hash.substring(0, 7);
-                    notes += `* ${scope}${commit.subject} ([${hash}](${context.repositoryUrl}/commit/${commit.hash}))\\n`;
+                    notes += `* ${scope}${commit.subject} (${hash})\\n`;
                   });
+                  notes += '\\n';
                 }
               });
 
-              return notes;
+              return notes.trim();
             }
           };
           EOJS
