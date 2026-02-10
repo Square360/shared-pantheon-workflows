@@ -57,7 +57,7 @@ jobs:
 
       - name: Create semantic-release config if not exists
         run: |
-          if [ ! -f .releaserc.json ] && [ ! -f .releaserc.yml ] && [ ! -f .releaserc.yaml ] && [ ! -f release.config.js ] && [ ! -f .releaserc.js ]; then
+          if [ ! -f .releaserc ] && [ ! -f .releaserc.json ] && [ ! -f .releaserc.yml ] && [ ! -f .releaserc.yaml ] && [ ! -f .releaserc.js ] && [ ! -f .releaserc.cjs ] && [ ! -f release.config.js ] && [ ! -f release.config.cjs ]; then
             echo "Creating default semantic-release configuration"
 
             # Create custom release notes generator to avoid date formatting issues
