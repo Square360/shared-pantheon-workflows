@@ -159,13 +159,13 @@ jobs:
       env:
         TERMINUS_MACHINE_TOKEN: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
       run: |
-        # Check PR title first, then commit message for order preference
+        # Check PR title for order preference
         # Use HERE document to safely handle all special characters
-        read -r -d '' COMMIT_MSG <<'EOF' || true
-        ${{ github.event.pull_request.title || github.event.head_commit.message }}
+        read -r -d '' PR_TITLE <<'EOF' || true
+        ${{ github.event.pull_request.title }}
         EOF
 
-        if [[ "$COMMIT_MSG" == *"[config-first]"* ]]; then
+        if [[ "$PR_TITLE" == *"[config-first]"* ]]; then
           echo "🔧 Running config import first (detected [config-first] tag)"
           terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- cim -y
           terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- updb -y
