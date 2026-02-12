@@ -55,13 +55,15 @@ jobs:
             npm install -g semantic-release @semantic-release/changelog @semantic-release/git @semantic-release/github @semantic-release/commit-analyzer @semantic-release/release-notes-generator conventional-changelog-conventionalcommits@^8.0.0
           fi
 
-      - name: Create semantic-release config if not exists
+      - name: Create semantic-release config
         run: |
-          if [ ! -f .releaserc ] && [ ! -f .releaserc.json ] && [ ! -f .releaserc.yml ] && [ ! -f .releaserc.yaml ] && [ ! -f .releaserc.js ] && [ ! -f .releaserc.cjs ] && [ ! -f release.config.js ] && [ ! -f release.config.cjs ]; then
-            echo "Creating default semantic-release configuration"
+          echo "Creating semantic-release configuration (ignoring any local configs)"
 
-            # Create custom release notes generator to avoid date formatting issues
-            cat > custom-release-notes.cjs << 'EOJS'
+          # Remove any existing config files to ensure we use the computed one
+          rm -f .releaserc .releaserc.json .releaserc.yml .releaserc.yaml .releaserc.js .releaserc.cjs release.config.js release.config.cjs
+
+          # Create custom release notes generator to avoid date formatting issues
+          cat > custom-release-notes.cjs << 'EOJS'
           module.exports = {
             generateNotes: async (pluginConfig, context) => {
               const commits = context.commits;
@@ -107,7 +109,7 @@ jobs:
           };
           EOJS
 
-            cat > .releaserc.js << 'EOF'
+          cat > .releaserc.js << 'EOF'
           module.exports = {
             branches: ${{ inputs.release_branches }},
             plugins: [
@@ -153,7 +155,6 @@ jobs:
             ]
           };
           EOF
-          fi
 
       - name: Validate git history
         run: |
