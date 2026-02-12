@@ -129,7 +129,11 @@ jobs:
                     {type: "test", release: false},
                     {type: "build", release: false},
                     {type: "ci", release: "patch"}
-                  ]
+                  ],
+                  parserOpts: {
+                    headerPattern: /^(\\w+)(?:\\(([\\w\\-\\.]+)\\))?:?\\s*(.*)$/,
+                    headerCorrespondence: ["type", "scope", "subject"]
+                  }
                 }
               ],
               "./custom-release-notes.cjs",
