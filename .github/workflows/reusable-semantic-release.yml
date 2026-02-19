@@ -85,10 +85,15 @@ jobs:
               const grouped = {};
               commits.forEach(commit => {
                 const header = (commit.message || '').split('\n')[0];
-                const match = header.match(/^(\w+)(?:\(([\w\-\.]+)\))?:?\s*(.*)$/);
+                const match = header.match(/^(\w+)(?:\(([\w\-\.]+)\))?(!)?:?\s*(.*)$/);
                 const type = match ? match[1] : 'other';
                 const scope = match ? (match[2] || null) : null;
-                const subject = match ? match[3] : header;
+                const rawSubject = match ? match[4] : header;
+                const trimmedRawSubject = (rawSubject || '').trim();
+                const fallbackCommitSubject = (commit.subject || '').trim();
+                const subject = trimmedRawSubject
+                  ? trimmedRawSubject
+                  : (fallbackCommitSubject || header);
                 if (!grouped[type]) grouped[type] = [];
                 grouped[type].push({ ...commit, type, scope, subject });
               });
@@ -135,8 +140,8 @@ jobs:
                     {type: "ci", release: "patch"}
                   ],
                   parserOpts: {
-                    headerPattern: /^(\w+)(?:\(([\w\-\.]+)\))?:?\s*(.*)$/,
-                    headerCorrespondence: ["type", "scope", "subject"]
+                    headerPattern: /^(\w+)(?:\(([\w\-\.]+)\))?(!)?:?\s*(.*)$/,
+                    headerCorrespondence: ["type", "scope", "breaking", "subject"]
                   }
                 }
               ],
