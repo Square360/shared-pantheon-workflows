@@ -98,7 +98,9 @@ jobs:
                 grouped[type].push({ ...commit, type, scope, subject });
               });
 
-              let notes = '';
+              const version = context.nextRelease.version;
+              const date = new Date().toISOString().split('T')[0];
+              let notes = `Release ${version} (${date})\n\n`;
 
               // Process types in order
               Object.keys(types).forEach(type => {
