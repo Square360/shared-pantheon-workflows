@@ -100,7 +100,7 @@ jobs:
 
               const version = context.nextRelease.version;
               const date = new Date().toISOString().split('T')[0];
-              let notes = `Release ${version} (${date})\n\n`;
+              let notes = `# Release ${version} (${date})\n\n`;
 
               // Process types in order
               Object.keys(types).forEach(type => {
