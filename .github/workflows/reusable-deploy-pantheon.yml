@@ -77,7 +77,7 @@ jobs:
     - name: Setup PHP
       uses: shivammathur/setup-php@v2
       with:
-        php-version: '8.3'
+        php-version: '8.4'
         tools: composer:v2
 
     - name: Add Bitbucket to known hosts
@@ -101,7 +101,7 @@ jobs:
 
     - name: deploy to Pantheon
       id: deploy_pantheon
-      uses: pantheon-systems/push-to-pantheon@0.8.0
+      uses: pantheon-systems/push-to-pantheon@0.9.0
       env:
         COMPOSER_NO_SECURITY_BLOCKING: 1
       with:
