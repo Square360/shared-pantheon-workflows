@@ -45,7 +45,7 @@ jobs:
       error_message: ${{ steps.capture_error.outputs.error_message }}
       failed_step: ${{ steps.capture_error.outputs.failed_step }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         # Use shallow clone to let pantheon action handle unshallowing
         fetch-depth: 1

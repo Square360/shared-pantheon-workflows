@@ -67,7 +67,7 @@ jobs:
       error_message: ${{ steps.capture_error.outputs.error_message }}
       failed_step: ${{ steps.capture_error.outputs.failed_step }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         # Ensure we checkout the target branch (master/main) for deployment
         ref: ${{ github.event.pull_request.base.ref || github.ref }}
