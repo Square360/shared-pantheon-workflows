@@ -93,7 +93,7 @@ jobs:
       run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
 
     - name: Cache Composer dependencies
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ${{ steps.composer-cache.outputs.dir }}
         key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
@@ -155,7 +155,7 @@ jobs:
 
     - name: Comment on PR with multidev URL
       if: ${{ github.event_name == 'pull_request' }}
-      uses: actions/github-script@v7
+      uses: actions/github-script@v8
       with:
         script: |
           const url = '${{ steps.multidev_url.outputs.url }}';
