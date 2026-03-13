@@ -7,7 +7,7 @@ on:
         description: 'Node.js version to use'
         required: false
         type: string
-        default: '18'
+        default: '24'
       release_branches:
         description: 'Branches to create releases from (JSON array)'
         required: false
@@ -42,7 +42,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ inputs.node_version }}
 
