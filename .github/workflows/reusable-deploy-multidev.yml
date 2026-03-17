@@ -27,6 +27,10 @@ on:
         required: true
       SLACK_BOT_TOKEN:
         required: false
+      CLICKUP_API_TOKEN:
+        required: false
+      CLICKUP_TEAM_ID:
+        required: false
 
 defaults:
   run:
@@ -75,6 +79,19 @@ jobs:
         else
           echo "source_env=dev" >> $GITHUB_OUTPUT
           echo "Using 'dev' as default source environment"
+        fi
+
+    - name: Check if multidev environment exists
+      id: check_env
+      env:
+        TERMINUS_MACHINE_TOKEN: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
+      run: |
+        if terminus env:list ${{ inputs.pantheon_site }} --format=list | grep -q "^${{ inputs.target_env }}$"; then
+          echo "env_is_new=false" >> $GITHUB_OUTPUT
+          echo "Multidev environment already exists, ClickUp comment will be skipped"
+        else
+          echo "env_is_new=true" >> $GITHUB_OUTPUT
+          echo "Multidev environment is new, ClickUp comment will be posted on creation"
         fi
 
     - name: Setup PHP
@@ -152,6 +169,37 @@ jobs:
         URL=$(terminus env:view ${{ inputs.pantheon_site }}.${{ inputs.target_env }} --print)
         echo "url=$URL" >> $GITHUB_OUTPUT
         echo "Multidev environment available at: $URL"
+
+    - name: Comment on ClickUp task with multidev URL
+      id: clickup_comment
+      if: ${{ steps.check_env.outputs.env_is_new == 'true' }}
+      env:
+        CLICKUP_API_TOKEN: ${{ secrets.CLICKUP_API_TOKEN }}
+        CLICKUP_TEAM_ID: ${{ secrets.CLICKUP_TEAM_ID }}
+      run: |
+        if [[ -z "$CLICKUP_API_TOKEN" || -z "$CLICKUP_TEAM_ID" ]]; then
+          echo "CLICKUP_API_TOKEN or CLICKUP_TEAM_ID not set, skipping ClickUp comment"
+          exit 0
+        fi
+        BRANCH="${{ github.head_ref || github.ref_name }}"
+        PR_TITLE="${{ github.event.pull_request.title }}"
+        # Extract ClickUp Custom ID (e.g. NJ2P-793, YISP-101) from branch name or PR title
+        TASK_ID=$(echo "$BRANCH $PR_TITLE" | grep -oP '[A-Z]+-[0-9]+' | head -1)
+        if [[ -z "$TASK_ID" ]]; then
+          echo "No ClickUp task ID found in branch name or PR title, skipping comment"
+          exit 0
+        fi
+        echo "Found ClickUp task ID: $TASK_ID"
+        URL="${{ steps.multidev_url.outputs.url }}"
+        RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+          "https://api.clickup.com/api/v2/task/${TASK_ID}/comment?custom_task_ids=true&team_id=${CLICKUP_TEAM_ID}" \
+          -H "Authorization: ${CLICKUP_API_TOKEN}" \
+          -H "Content-Type: application/json" \
+          -d "{\"comment_text\": \"Multidev environment created: ${URL}\n\nEnvironment: ${{ inputs.target_env }}\nSite: ${{ inputs.pantheon_site }}\"}")
+        echo "ClickUp API response code: $RESPONSE"
+        if [[ "$RESPONSE" != "200" ]]; then
+          echo "Warning: ClickUp comment may not have been posted (HTTP $RESPONSE)"
+        fi
 
     - name: Comment on PR with multidev URL
       if: ${{ github.event_name == 'pull_request' }}
