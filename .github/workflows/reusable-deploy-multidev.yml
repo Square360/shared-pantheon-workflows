@@ -203,11 +203,18 @@ jobs:
         else
           ENV_LABEL="Multidev"
         fi
+        PR_NUMBER="${{ github.event.pull_request.number }}"
+        REPO="${{ github.repository }}"
+        if [[ -n "$PR_NUMBER" ]]; then
+          PR_LINE="\nPull Request: https://github.com/${REPO}/pull/${PR_NUMBER}"
+        else
+          PR_LINE=""
+        fi
         RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
           "https://api.clickup.com/api/v2/task/${TASK_ID}/comment?custom_task_ids=true&team_id=${CLICKUP_TEAM_ID}" \
           -H "Authorization: ${CLICKUP_API_TOKEN}" \
           -H "Content-Type: application/json" \
-          -d "{\"comment_text\": \"The ${ENV_LABEL} environment was ${ACTION}: ${URL}\n\nEnvironment: ${{ inputs.target_env }}\nSite: ${{ inputs.pantheon_site }}\"}")
+          -d "{\"comment_text\": \"The ${ENV_LABEL} environment was ${ACTION}: ${URL}\n\nEnvironment: ${{ inputs.target_env }}\nSite: ${{ inputs.pantheon_site }}${PR_LINE}\"}")
         echo "ClickUp API response code: $RESPONSE"
         if [[ "$RESPONSE" != "200" ]]; then
           echo "Warning: ClickUp comment may not have been posted (HTTP $RESPONSE)"
