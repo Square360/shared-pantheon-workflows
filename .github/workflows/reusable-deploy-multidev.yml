@@ -195,11 +195,19 @@ jobs:
         else
           ACTION="updated"
         fi
+        TARGET_ENV="${{ inputs.target_env }}"
+        if [[ "$TARGET_ENV" =~ ^pr-[0-9]+$ ]]; then
+          ENV_LABEL="WIP Multidev"
+        elif [[ "$TARGET_ENV" =~ ^rc-[0-9]{4}-[0-9]+$ ]]; then
+          ENV_LABEL="Release Candidate Multidev"
+        else
+          ENV_LABEL="Multidev"
+        fi
         RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
           "https://api.clickup.com/api/v2/task/${TASK_ID}/comment?custom_task_ids=true&team_id=${CLICKUP_TEAM_ID}" \
           -H "Authorization: ${CLICKUP_API_TOKEN}" \
           -H "Content-Type: application/json" \
-          -d "{\"comment_text\": \"Multidev environment ${ACTION}: ${URL}\n\nEnvironment: ${{ inputs.target_env }}\nSite: ${{ inputs.pantheon_site }}\"}")
+          -d "{\"comment_text\": \"The ${ENV_LABEL} environment was ${ACTION}: ${URL}\n\nEnvironment: ${{ inputs.target_env }}\nSite: ${{ inputs.pantheon_site }}\"}")
         echo "ClickUp API response code: $RESPONSE"
         if [[ "$RESPONSE" != "200" ]]; then
           echo "Warning: ClickUp comment may not have been posted (HTTP $RESPONSE)"
