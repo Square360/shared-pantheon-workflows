@@ -182,8 +182,8 @@ jobs:
         fi
         BRANCH="${{ github.head_ref || github.ref_name }}"
         PR_TITLE="${{ github.event.pull_request.title }}"
-        # Extract ClickUp Custom ID (e.g. NJ2P-793, YISP-101) from branch name or PR title
-        TASK_ID=$(echo "$BRANCH $PR_TITLE" | grep -oP '[A-Z]+-[0-9]+' | head -1)
+        # Extract ClickUp Custom ID (e.g. NJ2P-793, S360-835) from branch name or PR title
+        TASK_ID=$(echo "$BRANCH $PR_TITLE" | grep -oP '[A-Z][A-Z0-9]+-[0-9]+' | head -1 || true)
         if [[ -z "$TASK_ID" ]]; then
           echo "No ClickUp task ID found in branch name or PR title, skipping comment"
           exit 0
