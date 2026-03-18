@@ -172,16 +172,20 @@ jobs:
 
     - name: Comment on ClickUp task with multidev URL
       id: clickup_comment
+      continue-on-error: true
       env:
         CLICKUP_API_TOKEN: ${{ secrets.CLICKUP_API_TOKEN }}
         CLICKUP_TEAM_ID: ${{ secrets.CLICKUP_TEAM_ID }}
       run: |
+        set -x
         if [[ -z "$CLICKUP_API_TOKEN" || -z "$CLICKUP_TEAM_ID" ]]; then
           echo "CLICKUP_API_TOKEN or CLICKUP_TEAM_ID not set, skipping ClickUp comment"
           exit 0
         fi
         BRANCH="${{ github.head_ref || github.ref_name }}"
         PR_TITLE="${{ github.event.pull_request.title }}"
+        echo "Branch: $BRANCH"
+        echo "PR Title: $PR_TITLE"
         # Extract ClickUp Custom ID (e.g. NJ2P-793, S360-835) from branch name or PR title
         TASK_ID=$(echo "$BRANCH $PR_TITLE" | grep -oP '[A-Z][A-Z0-9]+-[0-9]+' | head -1 || true)
         if [[ -z "$TASK_ID" ]]; then
@@ -210,12 +214,14 @@ jobs:
         else
           PR_LINE=""
         fi
-        RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+        RESPONSE=$(curl -s -o /tmp/clickup_response.json -w "%{http_code}" -X POST \
           "https://api.clickup.com/api/v2/task/${TASK_ID}/comment?custom_task_ids=true&team_id=${CLICKUP_TEAM_ID}" \
           -H "Authorization: ${CLICKUP_API_TOKEN}" \
           -H "Content-Type: application/json" \
-          -d "{\"comment_text\": \"The ${ENV_LABEL} environment was ${ACTION}: ${URL}\n\nEnvironment: ${{ inputs.target_env }}\nSite: ${{ inputs.pantheon_site }}${PR_LINE}\"}")
+          -d "{\"comment_text\": \"The ${ENV_LABEL} environment was ${ACTION}: ${URL}\n\nEnvironment: ${{ inputs.target_env }}\nSite: ${{ inputs.pantheon_site }}${PR_LINE}\"}" || true)
         echo "ClickUp API response code: $RESPONSE"
+        echo "ClickUp API response body:"
+        cat /tmp/clickup_response.json || true
         if [[ "$RESPONSE" != "200" ]]; then
           echo "Warning: ClickUp comment may not have been posted (HTTP $RESPONSE)"
         fi
