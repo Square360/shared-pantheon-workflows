@@ -86,7 +86,10 @@ jobs:
       env:
         TERMINUS_MACHINE_TOKEN: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
       run: |
-        if terminus env:info ${{ inputs.pantheon_site }}.${{ inputs.target_env }} > /dev/null 2>&1; then
+        echo "Checking if environment ${{ inputs.pantheon_site }}.${{ inputs.target_env }} exists..."
+        terminus env:info ${{ inputs.pantheon_site }}.${{ inputs.target_env }} && ENV_EXISTS=true || ENV_EXISTS=false
+        echo "terminus env:info exit result: $ENV_EXISTS"
+        if [[ "$ENV_EXISTS" == "true" ]]; then
           echo "env_is_new=false" >> $GITHUB_OUTPUT
           echo "Multidev environment already exists, ClickUp comment will say 'updated'"
         else
