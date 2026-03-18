@@ -232,6 +232,49 @@ git commit -m "Update entity types [config-first]"
 
 ---
 
+## 2026-03-17
+
+### Feature - ClickUp Integration for Multidev Deployments
+
+- **ClickUp Task Comments on Multidev Deploy**
+  - Added a step to `reusable-deploy-multidev.yml` that automatically posts a comment to the linked ClickUp task when a multidev environment is created or updated
+  - Task ID is extracted from the branch name or PR title using a regex pattern (e.g. `S360-835`, `NJ2P-793`)
+  - Comment includes the multidev URL, environment name, site name, and a link to the PR
+  - Comment distinguishes between "created" (new multidev) and "updated" (existing multidev)
+  - Comment label distinguishes between "WIP Multidev" (`pr-*`), "Release Candidate Multidev" (`rc-*`), and generic "Multidev"
+  - Step uses `continue-on-error: true` so ClickUp failures never block a deployment
+
+- **Secrets passed via `pantheon-github-workflows` template**
+  - Updated `workflow-configuration/templates/deploy-multidev.yml` in `pantheon-github-workflows` to pass `CLICKUP_API_TOKEN` and `CLICKUP_TEAM_ID` from org-level GitHub secrets
+
+### Bug Fixes - ClickUp Integration
+
+- **Terminus not installed for pre-deploy steps**
+  - **Issue:** `terminus: command not found` on the `Determine source environment` and `Check if multidev environment exists` steps — terminus is only installed by `push-to-pantheon`, which runs later
+  - **Fix:** Added an explicit `Install Terminus` step immediately after checkout that downloads the latest terminus phar, authenticates with `PANTHEON_MACHINE_TOKEN`, and makes terminus available for all subsequent steps
+
+- **Multidev existence check always returning "new"**
+  - **Issue:** Originally used `terminus env:list --format=list | grep -q "^<env>$"` — the grep pattern didn't reliably match the list output format
+  - **Fix:** Switched to `terminus env:info <site>.<env>` which exits 0 if the environment exists and non-zero if it doesn't — no output parsing required
+
+- **ClickUp task ID regex not matching alphanumeric prefixes**
+  - **Issue:** Regex `[A-Z]+-[0-9]+` did not match IDs like `S360-835` or `NJ2P-793` where the prefix contains digits
+  - **Fix:** Updated regex to `[A-Z][A-Z0-9]+-[0-9]+` to allow digits after the first letter
+
+- **`grep` exit code causing script failure under `set -e -o pipefail`**
+  - **Issue:** When no ClickUp task ID was found, `grep` returned exit code 1 which — with `pipefail` — propagated through the pipeline and killed the step
+  - **Fix:** Added `|| true` to the grep pipeline to prevent non-match from being treated as a fatal error
+
+- **Debugging added (temporary)**
+  - Added `set -x`, verbose echo statements, and curl response body logging to the ClickUp step to assist with diagnosis
+  - See `TODO.md` for a reminder to remove these once the integration is stable
+
+### Files Modified
+
+- `reusable-deploy-multidev.yml`: Terminus install step, env existence check fix, ClickUp comment step with all bug fixes applied
+
+---
+
 ## Collaboration Notes
 
 **Current Branch**: `fix/config-db-switch`
