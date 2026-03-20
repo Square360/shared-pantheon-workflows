@@ -1,0 +1,544 @@
+name: Reusable Visual Regression Test
+
+on:
+  workflow_call:
+    inputs:
+      pantheon_site:
+        description: 'Pantheon site machine name'
+        required: true
+        type: string
+      multidev_url:
+        description: 'Multidev URL to test (RC or PR environment)'
+        required: true
+        type: string
+      target_env:
+        description: 'Target environment name (e.g. rc-2025-12 or pr-42)'
+        required: true
+        type: string
+      slack_channel:
+        description: 'Slack channel for notifications'
+        required: false
+        type: string
+    secrets:
+      PANTHEON_MACHINE_TOKEN:
+        required: true
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+      AWS_S3_BUCKET:
+        required: true
+      AWS_S3_REGION:
+        required: false
+      CLICKUP_API_TOKEN:
+        required: false
+      CLICKUP_TEAM_ID:
+        required: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  visual_regression:
+    name: Visual Regression Test
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+
+    # -------------------------------------------------------------------------
+    # Step 1: Parse [vrt] tag from the PR body.
+    #
+    # Detects:
+    #   [vrt]                  — run VRT, no ClickUp comment
+    #   [vrt YMAC-959]         — run VRT, post results to that ClickUp task
+    #
+    # If no explicit task ID is found, falls back to scanning the branch name
+    # for a ClickUp-style ID (e.g. feature/ymac-959-my-feature → YMAC-959).
+    #
+    # Also parses an optional [vrt-pages]...[/vrt-pages] block for extra paths
+    # to test in addition to those in .github/workflows/vrt-config.yml:
+    #
+    #   [vrt-pages]
+    #   /seasonal/christmas-sale
+    #   /landing/special-promo
+    #   [/vrt-pages]
+    # -------------------------------------------------------------------------
+    - name: Parse [vrt] tag from PR body
+      id: vrt_check
+      env:
+        PR_BODY: ${{ github.event.pull_request.body }}
+      run: |
+        if [[ -z "$PR_BODY" ]] || ! echo "$PR_BODY" | grep -qP '\[vrt\b'; then
+          echo "No [vrt] tag found in PR body — skipping VRT"
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        echo "enabled=true" >> "$GITHUB_OUTPUT"
+        echo "[vrt] tag detected"
+
+        # Extract optional ClickUp task ID from the tag itself: [vrt YMAC-959]
+        TASK_ID=$(echo "$PR_BODY" | grep -oP '\[vrt\s+([A-Z][A-Z0-9]+-[0-9]+)' | grep -oP '[A-Z][A-Z0-9]+-[0-9]+' | head -1 || true)
+
+        # Fallback: scan branch name (e.g. feature/ymac-959-my-feature → YMAC-959)
+        if [[ -z "$TASK_ID" ]]; then
+          BRANCH="${{ github.head_ref }}"
+          TASK_ID=$(echo "$BRANCH" | grep -oiP '[A-Z][A-Z0-9]+-[0-9]+' | head -1 | tr '[:lower:]' '[:upper:]' || true)
+          if [[ -n "$TASK_ID" ]]; then
+            echo "ClickUp task ID resolved from branch name: ${TASK_ID}"
+          fi
+        fi
+
+        echo "clickup_task_id=${TASK_ID}" >> "$GITHUB_OUTPUT"
+        echo "ClickUp task ID: ${TASK_ID:-none}"
+
+        # Extract extra paths from the [vrt-pages]...[/vrt-pages] block
+        # (one absolute path per line, e.g. /seasonal/sale)
+        # Paths are pipe-separated in the output for easy splitting in Node.
+        EXTRA_PAGES=$(printf '%s' "$PR_BODY" \
+          | sed -n '/\[vrt-pages\]/,/\[\/vrt-pages\]/p' \
+          | grep -E '^\s*/' \
+          | sed 's/^\s*//' \
+          | paste -sd '|' -)
+        echo "extra_pages=${EXTRA_PAGES}" >> "$GITHUB_OUTPUT"
+        if [[ -n "$EXTRA_PAGES" ]]; then
+          echo "Extra pages from PR body: ${EXTRA_PAGES}"
+        fi
+
+    - name: Checkout
+      if: steps.vrt_check.outputs.enabled == 'true'
+      uses: actions/checkout@v6
+
+    - name: Install Terminus
+      if: steps.vrt_check.outputs.enabled == 'true'
+      env:
+        TERMINUS_MACHINE_TOKEN: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
+      run: |
+        TERMINUS_VERSION=$(curl -s https://api.github.com/repos/pantheon-systems/terminus/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+        curl -fsSL "https://github.com/pantheon-systems/terminus/releases/download/${TERMINUS_VERSION}/terminus.phar" \
+          -o /usr/local/bin/terminus
+        chmod +x /usr/local/bin/terminus
+        terminus auth:login --machine-token="$TERMINUS_MACHINE_TOKEN"
+
+    - name: Get LIVE URL
+      id: live_url
+      if: steps.vrt_check.outputs.enabled == 'true'
+      run: |
+        URL=$(terminus env:view ${{ inputs.pantheon_site }}.live --print)
+        URL="${URL%/}"
+        echo "url=${URL}" >> "$GITHUB_OUTPUT"
+        echo "LIVE URL: ${URL}"
+
+    - name: Setup Node.js
+      if: steps.vrt_check.outputs.enabled == 'true'
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install Playwright and dependencies
+      if: steps.vrt_check.outputs.enabled == 'true'
+      run: |
+        npm install --no-save playwright pixelmatch pngjs js-yaml
+        npx playwright install chromium --with-deps
+
+    # -------------------------------------------------------------------------
+    # Write the VRT script to vrt.mjs.
+    # Uses a quoted heredoc so JS template literals and $VARS are not expanded.
+    # -------------------------------------------------------------------------
+    - name: Write VRT script
+      if: steps.vrt_check.outputs.enabled == 'true'
+      run: |
+        cat > vrt.mjs << 'VRTEOF'
+        import { chromium } from 'playwright';
+        import { PNG } from 'pngjs';
+        import pixelmatch from 'pixelmatch';
+        import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
+        import { parse as parseYaml } from 'js-yaml';
+
+        const LIVE_URL        = (process.env.LIVE_URL || '').replace(/\/$/, '');
+        const RC_URL          = (process.env.RC_URL || '').replace(/\/$/, '');
+        const TARGET_ENV      = process.env.TARGET_ENV || '';
+        const PANTHEON_SITE   = process.env.PANTHEON_SITE || '';
+        const EXTRA_PAGES_RAW = process.env.EXTRA_PAGES || '';
+        const RUN_ID          = process.env.GITHUB_RUN_ID || 'local';
+        const CONFIG_PATH     = '.github/workflows/vrt-config.yml';
+
+        const DEFAULT_CONFIG = {
+          vrt: {
+            threshold: 0.05,
+            fail_on_diff: false,
+            viewports: [
+              { width: 1440, height: 900,  name: 'desktop' },
+              { width: 390,  height: 844,  name: 'mobile'  },
+            ],
+            pages: [{ path: '/', name: 'homepage' }],
+          },
+        };
+
+        let config = DEFAULT_CONFIG;
+        if (existsSync(CONFIG_PATH)) {
+          try {
+            config = parseYaml(readFileSync(CONFIG_PATH, 'utf8'));
+            console.log('Loaded vrt-config.yml');
+          } catch (e) {
+            console.warn(`Failed to parse vrt-config.yml, using defaults: ${e.message}`);
+            config = DEFAULT_CONFIG;
+          }
+        } else {
+          console.log('No vrt-config.yml found — using defaults (homepage, desktop + mobile)');
+        }
+
+        const threshold  = config.vrt?.threshold    ?? 0.05;
+        const failOnDiff = config.vrt?.fail_on_diff ?? false;
+        const viewports  = config.vrt?.viewports    ?? DEFAULT_CONFIG.vrt.viewports;
+        const pages      = [...(config.vrt?.pages   ?? DEFAULT_CONFIG.vrt.pages)];
+
+        // Merge extra paths from the [vrt-pages] block in the PR body
+        if (EXTRA_PAGES_RAW) {
+          for (const raw of EXTRA_PAGES_RAW.split('|').filter(Boolean)) {
+            const pagePath = raw.trim();
+            if (pagePath && !pages.find(p => p.path === pagePath)) {
+              const slug = pagePath.replace(/^\//, '').replace(/\//g, '-') || 'root';
+              pages.push({ path: pagePath, name: slug });
+              console.log(`  + Extra page from PR body: ${pagePath}`);
+            }
+          }
+        }
+
+        console.log(`\nPages     : ${pages.map(p => p.path).join(', ')} (${pages.length})`);
+        console.log(`Viewports : ${viewports.map(v => v.name).join(', ')} (${viewports.length})`);
+        console.log(`Threshold : ${(threshold * 100).toFixed(1)}%  |  fail_on_diff: ${failOnDiff}\n`);
+
+        for (const dir of ['screenshots/live', 'screenshots/rc', 'screenshots/diff']) {
+          mkdirSync(dir, { recursive: true });
+        }
+
+        // Pad the shorter image with white so pixelmatch gets equal-sized inputs.
+        // This handles pages where LIVE and RC have different content lengths.
+        function padImage(img, targetWidth, targetHeight) {
+          if (img.width === targetWidth && img.height === targetHeight) return img;
+          const out = new PNG({ width: targetWidth, height: targetHeight });
+          for (let i = 0; i < out.data.length; i += 4) {
+            out.data[i] = 255; out.data[i+1] = 255; out.data[i+2] = 255; out.data[i+3] = 255;
+          }
+          for (let y = 0; y < Math.min(img.height, targetHeight); y++) {
+            for (let x = 0; x < Math.min(img.width, targetWidth); x++) {
+              const si = (y * img.width + x) * 4;
+              const di = (y * targetWidth + x) * 4;
+              out.data.set(img.data.subarray(si, si + 4), di);
+            }
+          }
+          return out;
+        }
+
+        function b64(filePath) {
+          if (!filePath || !existsSync(filePath)) return null;
+          return readFileSync(filePath).toString('base64');
+        }
+
+        const results = [];
+        const browser = await chromium.launch();
+
+        for (const viewport of viewports) {
+          const ctx  = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height } });
+          const page = await ctx.newPage();
+
+          for (const pageConfig of pages) {
+            const slug     = `${pageConfig.name}-${viewport.name}`;
+            const liveFile = `screenshots/live/${slug}.png`;
+            const rcFile   = `screenshots/rc/${slug}.png`;
+            const diffFile = `screenshots/diff/${slug}.png`;
+
+            let error = null;
+            try {
+              await page.goto(`${LIVE_URL}${pageConfig.path}`, { waitUntil: 'networkidle', timeout: 30000 });
+              await page.screenshot({ path: liveFile, fullPage: true });
+
+              await page.goto(`${RC_URL}${pageConfig.path}`, { waitUntil: 'networkidle', timeout: 30000 });
+              await page.screenshot({ path: rcFile, fullPage: true });
+
+              const liveRaw = PNG.sync.read(readFileSync(liveFile));
+              const rcRaw   = PNG.sync.read(readFileSync(rcFile));
+              const w = Math.max(liveRaw.width,  rcRaw.width);
+              const h = Math.max(liveRaw.height, rcRaw.height);
+              const liveImg = padImage(liveRaw, w, h);
+              const rcImg   = padImage(rcRaw,   w, h);
+
+              const diff   = new PNG({ width: w, height: h });
+              const diffPx = pixelmatch(liveImg.data, rcImg.data, diff.data, w, h, { threshold: 0.1 });
+              writeFileSync(diffFile, PNG.sync.write(diff));
+
+              const totalPx  = w * h;
+              const diffRatio = diffPx / totalPx;
+              const passed    = diffRatio <= threshold;
+
+              results.push({
+                page: pageConfig.name, path: pageConfig.path, viewport: viewport.name, slug,
+                width: w, height: h, diffPixels: diffPx, totalPixels: totalPx,
+                diffRatio:   parseFloat(diffRatio.toFixed(6)),
+                diffPercent: parseFloat((diffRatio * 100).toFixed(2)),
+                passed, liveFile, rcFile, diffFile, error: null,
+              });
+
+              console.log(`${passed ? '✅' : '❌'} ${pageConfig.name} @ ${viewport.name}: ${(diffRatio * 100).toFixed(2)}% diff (${diffPx} px)`);
+            } catch (e) {
+              error = e.message;
+              console.error(`⚠️  ${pageConfig.name} @ ${viewport.name}: ${e.message}`);
+              results.push({
+                page: pageConfig.name, path: pageConfig.path, viewport: viewport.name, slug,
+                diffPixels: 0, totalPixels: 0, diffRatio: 0, diffPercent: 0,
+                passed: false, liveFile: null, rcFile: null, diffFile: null, error,
+              });
+            }
+          }
+
+          await ctx.close();
+        }
+
+        await browser.close();
+
+        const allPassed  = results.every(r => r.passed);
+        const passCount  = results.filter(r => r.passed).length;
+        const failCount  = results.length - passCount;
+
+        // -----------------------------------------------------------------------
+        // HTML report — self-contained, all screenshots base64-encoded inline.
+        // -----------------------------------------------------------------------
+        const htmlRows = results.map(r => {
+          const statusCell = r.error ? '⚠️ Error' : (r.passed ? '✅ Pass' : '❌ Fail');
+          const rowClass   = r.passed ? '' : 'fail-row';
+          const liveB64    = b64(r.liveFile);
+          const rcB64      = b64(r.rcFile);
+          const diffB64    = b64(r.diffFile);
+
+          const imgs = [
+            liveB64 ? `<div><div class="lbl">LIVE</div><img src="data:image/png;base64,${liveB64}"></div>` : '',
+            diffB64 ? `<div><div class="lbl">DIFF — ${r.diffPercent}%</div><img src="data:image/png;base64,${diffB64}"></div>` : '',
+            rcB64   ? `<div><div class="lbl">RC (${TARGET_ENV})</div><img src="data:image/png;base64,${rcB64}"></div>` : '',
+          ].filter(Boolean).join('');
+
+          const diffCell = r.error
+            ? `<span class="err">${r.error}</span>`
+            : `${r.diffPercent}% (${r.diffPixels} px)`;
+
+          return `
+            <tr class="${rowClass}">
+              <td>${statusCell}</td>
+              <td>${r.page}</td>
+              <td><code>${r.path}</code></td>
+              <td>${r.viewport} (${r.width}×${r.height})</td>
+              <td>${diffCell}</td>
+            </tr>
+            ${imgs ? `<tr class="${rowClass}"><td colspan="5"><div class="grid">${imgs}</div></td></tr>` : ''}`;
+        }).join('\n');
+
+        const html = `<!DOCTYPE html>
+        <html><head><meta charset="utf-8">
+        <title>VRT · ${PANTHEON_SITE} · ${TARGET_ENV}</title>
+        <style>
+          body { font-family: sans-serif; padding: 2rem; max-width: 1600px; margin: 0 auto; }
+          h1   { margin-bottom: .25rem; }
+          .meta { color: #555; margin-bottom: 1.5rem; font-size: .9rem; }
+          .banner { padding: 1rem; border-radius: 6px; margin-bottom: 2rem; font-size: 1.1rem; }
+          .pass { background: #d4edda; color: #155724; }
+          .fail { background: #f8d7da; color: #721c24; }
+          table { border-collapse: collapse; width: 100%; }
+          th, td { padding: .5rem 1rem; border: 1px solid #ddd; text-align: left; vertical-align: top; }
+          th { background: #f8f9fa; }
+          .fail-row td { background: #fff3f3; }
+          .grid { display: flex; gap: 1rem; padding: .5rem 0; flex-wrap: wrap; }
+          .grid > div { flex: 1; min-width: 220px; }
+          .grid img { max-width: 100%; border: 1px solid #ddd; display: block; }
+          .lbl { font-size: .75rem; font-weight: bold; color: #555; margin-bottom: .25rem; }
+          .err { color: #dc3545; }
+          code { background: #f8f9fa; padding: .1rem .3rem; border-radius: 3px; }
+          footer { margin-top: 2rem; color: #888; font-size: .85rem; }
+        </style></head>
+        <body>
+        <h1>Visual Regression Test Report</h1>
+        <p class="meta">
+          <strong>Site:</strong> ${PANTHEON_SITE} &nbsp;·&nbsp;
+          <strong>Env:</strong> ${TARGET_ENV} vs live &nbsp;·&nbsp;
+          <strong>RC:</strong> <a href="${RC_URL}">${RC_URL}</a> &nbsp;·&nbsp;
+          <strong>Run:</strong> #${RUN_ID}
+        </p>
+        <div class="banner ${allPassed ? 'pass' : 'fail'}">
+          ${allPassed ? '✅ All checks passed' : '❌ Some checks failed'} —
+          ${passCount} passed, ${failCount} failed &nbsp;·&nbsp; Threshold: ${(threshold * 100).toFixed(1)}%
+        </div>
+        <table>
+          <thead>
+            <tr><th>Status</th><th>Page</th><th>Path</th><th>Viewport</th><th>Diff / Error</th></tr>
+          </thead>
+          <tbody>${htmlRows}</tbody>
+        </table>
+        <footer>Generated by reusable-visual-regression.yml</footer>
+        </body></html>`;
+
+        writeFileSync('report.html', html);
+
+        // -----------------------------------------------------------------------
+        // vrt-summary.json — consumed by the PR comment and assertion steps.
+        // -----------------------------------------------------------------------
+        writeFileSync('vrt-summary.json', JSON.stringify({
+          allPassed, passCount, failCount,
+          threshold, thresholdPercent: parseFloat((threshold * 100).toFixed(1)),
+          failOnDiff, results,
+        }, null, 2));
+
+        console.log(`\nVRT complete: ${allPassed ? 'ALL PASSED ✅' : 'SOME FAILED ❌'}`);
+        VRTEOF
+
+    - name: Run VRT
+      id: run_vrt
+      if: steps.vrt_check.outputs.enabled == 'true'
+      env:
+        LIVE_URL:       ${{ steps.live_url.outputs.url }}
+        RC_URL:         ${{ inputs.multidev_url }}
+        TARGET_ENV:     ${{ inputs.target_env }}
+        PANTHEON_SITE:  ${{ inputs.pantheon_site }}
+        EXTRA_PAGES:    ${{ steps.vrt_check.outputs.extra_pages }}
+        GITHUB_RUN_ID:  ${{ github.run_id }}
+      run: node vrt.mjs
+
+    - name: Upload screenshots and report to S3
+      id: s3_upload
+      if: steps.vrt_check.outputs.enabled == 'true' && steps.run_vrt.conclusion == 'success'
+      env:
+        AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        AWS_S3_BUCKET:         ${{ secrets.AWS_S3_BUCKET }}
+        AWS_S3_REGION_INPUT:   ${{ secrets.AWS_S3_REGION }}
+        PANTHEON_SITE:         ${{ inputs.pantheon_site }}
+      run: |
+        AWS_DEFAULT_REGION="${AWS_S3_REGION_INPUT:-us-east-1}"
+        export AWS_DEFAULT_REGION
+
+        PR_NUMBER="${{ github.event.pull_request.number }}"
+        RUN_KEY="${PR_NUMBER}-${{ github.run_id }}-${{ github.run_attempt }}"
+        S3_PREFIX="s3://${AWS_S3_BUCKET}/${PANTHEON_SITE}/${RUN_KEY}"
+
+        aws s3 cp screenshots/live/ "${S3_PREFIX}/live/" --recursive --quiet
+        aws s3 cp screenshots/rc/   "${S3_PREFIX}/rc/"   --recursive --quiet
+        aws s3 cp screenshots/diff/ "${S3_PREFIX}/diff/" --recursive --quiet
+        aws s3 cp report.html "${S3_PREFIX}/report.html" --content-type "text/html" --quiet
+
+        REPORT_URL="https://${AWS_S3_BUCKET}.s3.${AWS_DEFAULT_REGION}.amazonaws.com/${PANTHEON_SITE}/${RUN_KEY}/report.html"
+        echo "report_url=${REPORT_URL}" >> "$GITHUB_OUTPUT"
+        echo "Report uploaded: ${REPORT_URL}"
+
+    - name: Comment on PR
+      if: steps.vrt_check.outputs.enabled == 'true' && steps.run_vrt.conclusion == 'success'
+      uses: actions/github-script@v8
+      env:
+        REPORT_URL:    ${{ steps.s3_upload.outputs.report_url }}
+        TARGET_ENV:    ${{ inputs.target_env }}
+        MULTIDEV_URL:  ${{ inputs.multidev_url }}
+      with:
+        script: |
+          const fs         = require('fs');
+          const summary    = JSON.parse(fs.readFileSync('vrt-summary.json', 'utf8'));
+          const reportUrl  = process.env.REPORT_URL;
+          const targetEnv  = process.env.TARGET_ENV;
+          const rcUrl      = process.env.MULTIDEV_URL;
+
+          const icon       = summary.allPassed ? '✅' : '❌';
+          const statusText = summary.allPassed ? 'All checks passed' : 'Some checks failed';
+
+          const tableRows = summary.results.map(r => {
+            const rowIcon = r.error ? '⚠️' : (r.passed ? '✅' : '❌');
+            const diff    = r.error ? 'Error' : `${r.diffPercent}%`;
+            return `| ${rowIcon} | ${r.page} | \`${r.path}\` | ${r.viewport} | ${diff} |`;
+          }).join('\n');
+
+          const body = [
+            `## ${icon} Visual Regression Test — ${statusText}`,
+            '',
+            `**${summary.passCount} passed, ${summary.failCount} failed** · Threshold: ${summary.thresholdPercent}%`,
+            '',
+            `| | Page | Path | Viewport | Diff |`,
+            `|:---:|---|---|---|---|`,
+            tableRows,
+            '',
+            `[📊 View Full Report with Screenshots](${reportUrl})`,
+            '',
+            `> RC: \`${targetEnv}\` — ${rcUrl}`,
+          ].join('\n');
+
+          await github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body,
+          });
+
+    # Post VRT results to the ClickUp task identified from [vrt TASK-ID] or branch name.
+    # Skipped gracefully if CLICKUP_API_TOKEN / CLICKUP_TEAM_ID are not configured.
+    - name: Comment on ClickUp task
+      if: >
+        steps.vrt_check.outputs.enabled == 'true' &&
+        steps.run_vrt.conclusion == 'success' &&
+        steps.vrt_check.outputs.clickup_task_id != ''
+      continue-on-error: true
+      env:
+        CLICKUP_API_TOKEN: ${{ secrets.CLICKUP_API_TOKEN }}
+        CLICKUP_TEAM_ID:   ${{ secrets.CLICKUP_TEAM_ID }}
+        TASK_ID:           ${{ steps.vrt_check.outputs.clickup_task_id }}
+        REPORT_URL:        ${{ steps.s3_upload.outputs.report_url }}
+        TARGET_ENV:        ${{ inputs.target_env }}
+        MULTIDEV_URL:      ${{ inputs.multidev_url }}
+      run: |
+        if [[ -z "$CLICKUP_API_TOKEN" || -z "$CLICKUP_TEAM_ID" ]]; then
+          echo "CLICKUP_API_TOKEN or CLICKUP_TEAM_ID not set — skipping ClickUp comment"
+          exit 0
+        fi
+
+        COMMENT_TEXT=$(node -e "
+          const s = JSON.parse(require('fs').readFileSync('vrt-summary.json'));
+          const icon = s.allPassed ? '✅' : '❌';
+          const rows = s.results.map(r => {
+            const i    = r.error ? '⚠️' : (r.passed ? '✅' : '❌');
+            const diff = r.error ? 'Error' : r.diffPercent + '%';
+            return \`\${i} \${r.page} (\${r.viewport}): \${diff}\`;
+          }).join('\n');
+          const text = [
+            \`\${icon} Visual Regression Test — \${s.passCount} passed, \${s.failCount} failed (threshold \${s.thresholdPercent}%)\`,
+            '',
+            rows,
+            '',
+            \`Environment : \${process.env.TARGET_ENV}\`,
+            \`RC URL      : \${process.env.MULTIDEV_URL}\`,
+            \`Report      : \${process.env.REPORT_URL}\`,
+          ].join('\n');
+          console.log(text);
+        ")
+
+        RESPONSE=$(curl -s -o /tmp/cu_vrt_response.json -w "%{http_code}" -X POST \
+          "https://api.clickup.com/api/v2/task/${TASK_ID}/comment?custom_task_ids=true&team_id=${CLICKUP_TEAM_ID}" \
+          -H "Authorization: ${CLICKUP_API_TOKEN}" \
+          -H "Content-Type: application/json" \
+          -d "$(jq -n --arg text "$COMMENT_TEXT" '{"comment_text": $text}')")
+
+        echo "ClickUp API response: ${RESPONSE}"
+        cat /tmp/cu_vrt_response.json || true
+        if [[ "$RESPONSE" != "200" ]]; then
+          echo "Warning: ClickUp comment may not have posted (HTTP ${RESPONSE})"
+        fi
+
+    # Fail the job here (after comments are already posted) if fail_on_diff is
+    # enabled in vrt-config.yml and differences exceeded the threshold.
+    - name: Assert VRT results
+      if: steps.vrt_check.outputs.enabled == 'true' && steps.run_vrt.conclusion == 'success'
+      run: |
+        SHOULD_FAIL=$(node -e "
+          const s = JSON.parse(require('fs').readFileSync('vrt-summary.json'));
+          console.log(!s.allPassed && s.failOnDiff ? 'true' : 'false');
+        ")
+        if [[ "$SHOULD_FAIL" == "true" ]]; then
+          echo "❌ Visual differences exceeded threshold and fail_on_diff is enabled in vrt-config.yml"
+          exit 1
+        fi
+        echo "✅ VRT assertion passed"
