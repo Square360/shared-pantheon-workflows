@@ -15,6 +15,16 @@ on:
         description: 'Slack channel for notifications'
         required: false
         type: string
+      force_run:
+        description: 'Skip [vrt] tag check and run unconditionally (for manual triggers)'
+        required: false
+        type: boolean
+        default: false
+      pr_head_ref:
+        description: 'PR head branch name — used for ClickUp ID fallback on manual runs'
+        required: false
+        type: string
+        default: ''
     secrets:
       PANTHEON_MACHINE_TOKEN:
         required: true
@@ -69,6 +79,20 @@ jobs:
       env:
         PR_BODY: ${{ github.event.pull_request.body }}
       run: |
+        FORCE_RUN="${{ inputs.force_run }}"
+
+        if [[ "$FORCE_RUN" == "true" ]]; then
+          echo "Manual trigger — skipping [vrt] tag check"
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+          # No PR body to parse — resolve ClickUp ID from pr_head_ref if provided
+          BRANCH="${{ inputs.pr_head_ref }}"
+          TASK_ID=$(echo "$BRANCH" | grep -oiP '[A-Z][A-Z0-9]+-[0-9]+' | head -1 | tr '[:lower:]' '[:upper:]' || true)
+          echo "clickup_task_id=${TASK_ID}" >> "$GITHUB_OUTPUT"
+          echo "extra_pages=" >> "$GITHUB_OUTPUT"
+          echo "ClickUp task ID: ${TASK_ID:-none}"
+          exit 0
+        fi
+
         if [[ -z "$PR_BODY" ]] || ! echo "$PR_BODY" | grep -qP '\[vrt\b'; then
           echo "No [vrt] tag found in PR body — skipping VRT"
           echo "enabled=false" >> "$GITHUB_OUTPUT"
@@ -83,7 +107,7 @@ jobs:
 
         # Fallback: scan branch name (e.g. feature/ymac-959-my-feature → YMAC-959)
         if [[ -z "$TASK_ID" ]]; then
-          BRANCH="${{ github.head_ref }}"
+          BRANCH="${{ inputs.pr_head_ref || github.head_ref }}"
           TASK_ID=$(echo "$BRANCH" | grep -oiP '[A-Z][A-Z0-9]+-[0-9]+' | head -1 | tr '[:lower:]' '[:upper:]' || true)
           if [[ -n "$TASK_ID" ]]; then
             echo "ClickUp task ID resolved from branch name: ${TASK_ID}"
