@@ -1,6 +1,5 @@
 # OS generated files
 .DS_Store
-.DS_Store?
 ._*
 .Spotlight-V100
 .Trashes
@@ -23,3 +22,5 @@ package.json
 package-lock.json
 .releaserc.json
 *.code-workspace
+.env
+.claude
