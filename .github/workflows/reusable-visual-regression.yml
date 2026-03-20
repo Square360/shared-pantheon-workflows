@@ -30,6 +30,8 @@ on:
         required: false
       CLICKUP_TEAM_ID:
         required: false
+      SLACK_BOT_TOKEN:
+        required: false
 
 defaults:
   run:
@@ -499,7 +501,7 @@ jobs:
         TASK_ID:           ${{ steps.vrt_check.outputs.clickup_task_id }}
         REPORT_URL:        ${{ steps.s3_upload.outputs.report_url }}
         TARGET_ENV:        ${{ inputs.target_env }}
-        MULTIDEV_URL:      ${{ inputs.multidev_url }}
+        MULTIDEV_URL:      ${{ steps.get_urls.outputs.rc_url }}
       run: |
         if [[ -z "$CLICKUP_API_TOKEN" || -z "$CLICKUP_TEAM_ID" ]]; then
           echo "CLICKUP_API_TOKEN or CLICKUP_TEAM_ID not set — skipping ClickUp comment"
@@ -552,3 +554,69 @@ jobs:
           exit 1
         fi
         echo "✅ VRT assertion passed"
+
+    # Runs after assert (even on failure) so fail_on_diff jobs still notify.
+    - name: Notify Slack
+      if: >
+        always() &&
+        steps.vrt_check.outputs.enabled == 'true' &&
+        steps.run_vrt.conclusion == 'success' &&
+        inputs.slack_channel != ''
+      env:
+        SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        SLACK_CHANNEL:   ${{ inputs.slack_channel }}
+        REPORT_URL:      ${{ steps.s3_upload.outputs.report_url }}
+        TARGET_ENV:      ${{ inputs.target_env }}
+        PANTHEON_SITE:   ${{ inputs.pantheon_site }}
+      run: |
+        if [[ -z "$SLACK_BOT_TOKEN" ]]; then
+          echo "SLACK_BOT_TOKEN not set — skipping Slack notification"
+          exit 0
+        fi
+
+        ALL_PASSED=$(node -e "const s=JSON.parse(require('fs').readFileSync('vrt-summary.json')); console.log(s.allPassed)")
+        PASS_COUNT=$(node -e "const s=JSON.parse(require('fs').readFileSync('vrt-summary.json')); console.log(s.passCount)")
+        FAIL_COUNT=$(node -e "const s=JSON.parse(require('fs').readFileSync('vrt-summary.json')); console.log(s.failCount)")
+        THRESHOLD=$(node  -e "const s=JSON.parse(require('fs').readFileSync('vrt-summary.json')); console.log(s.thresholdPercent)")
+
+        if [[ "$ALL_PASSED" == "true" ]]; then
+          STATUS_EMOJI=":white_check_mark:"
+          STATUS_COLOR="good"
+          STATUS_TEXT="All checks passed"
+        else
+          STATUS_EMOJI=":x:"
+          STATUS_COLOR="danger"
+          STATUS_TEXT="Some checks failed"
+        fi
+
+        PR_NUMBER="${{ github.event.pull_request.number }}"
+        REPO="${{ github.repository }}"
+        PR_FIELD=""
+        if [[ -n "$PR_NUMBER" ]]; then
+          PR_FIELD=",{\"title\": \"Pull Request\", \"value\": \"<https://github.com/${REPO}/pull/${PR_NUMBER}|#${PR_NUMBER}>\", \"short\": true}"
+        fi
+
+        REPORT_FIELD=""
+        if [[ -n "$REPORT_URL" ]]; then
+          REPORT_FIELD=",{\"title\": \"Report\", \"value\": \"<${REPORT_URL}|View Full Report>\", \"short\": false}"
+        fi
+
+        curl -X POST -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+          -H 'Content-type: application/json; charset=utf-8' \
+          --data "{
+            \"channel\": \"${SLACK_CHANNEL}\",
+            \"text\": \"${STATUS_EMOJI} Visual Regression Test — ${STATUS_TEXT}\",
+            \"attachments\": [{
+              \"color\": \"${STATUS_COLOR}\",
+              \"fields\": [
+                {\"title\": \"Site\",        \"value\": \"${PANTHEON_SITE}\", \"short\": true},
+                {\"title\": \"Environment\", \"value\": \"${TARGET_ENV}\",    \"short\": true},
+                {\"title\": \"Results\",     \"value\": \"${PASS_COUNT} passed, ${FAIL_COUNT} failed (threshold ${THRESHOLD}%)\", \"short\": false}
+                ${PR_FIELD}
+                ${REPORT_FIELD}
+              ],
+              \"footer\": \"GitHub Actions\",
+              \"ts\": $(date +%s)
+            }]
+          }" \
+          https://slack.com/api/chat.postMessage
