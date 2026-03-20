@@ -228,6 +228,14 @@ jobs:
           mkdirSync(dir, { recursive: true });
         }
 
+        // Injected into every page before screenshotting:
+        //  - freeze CSS animations/transitions so they don't cause false diffs
+        //  - hide iframes and videos (dynamic/third-party content not under test)
+        const VRT_STYLE = [
+          '*, *::before, *::after { animation-duration: 0.001s !important; animation-delay: 0s !important; transition-duration: 0.001s !important; transition-delay: 0s !important; }',
+          'iframe, video { visibility: hidden !important; }',
+        ].join('\n');
+
         // Pad the shorter image with white so pixelmatch gets equal-sized inputs.
         // This handles pages where LIVE and RC have different content lengths.
         function padImage(img, targetWidth, targetHeight) {
@@ -255,7 +263,10 @@ jobs:
         const browser = await chromium.launch();
 
         for (const viewport of viewports) {
-          const ctx  = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height } });
+          const ctx  = await browser.newContext({
+            viewport: { width: viewport.width, height: viewport.height },
+            reducedMotion: 'reduce',
+          });
           const page = await ctx.newPage();
 
           for (const pageConfig of pages) {
@@ -267,10 +278,12 @@ jobs:
             let error = null;
             try {
               await page.goto(`${LIVE_URL}${pageConfig.path}`, { waitUntil: 'networkidle', timeout: 30000 });
+              await page.addStyleTag({ content: VRT_STYLE });
               await page.waitForTimeout(6000);
-              await page.screenshot({ path: liveFile });
+              await page.screenshot({ path: liveFile, fullPage: true });
 
               await page.goto(`${RC_URL}${pageConfig.path}`, { waitUntil: 'networkidle', timeout: 30000 });
+              await page.addStyleTag({ content: VRT_STYLE });
               await page.waitForTimeout(6000);
               await page.screenshot({ path: rcFile, fullPage: true });
 
