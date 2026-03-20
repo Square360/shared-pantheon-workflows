@@ -267,9 +267,11 @@ jobs:
             let error = null;
             try {
               await page.goto(`${LIVE_URL}${pageConfig.path}`, { waitUntil: 'networkidle', timeout: 30000 });
+              await page.waitForTimeout(6000);
               await page.screenshot({ path: liveFile, fullPage: true });
 
               await page.goto(`${RC_URL}${pageConfig.path}`, { waitUntil: 'networkidle', timeout: 30000 });
+              await page.waitForTimeout(6000);
               await page.screenshot({ path: rcFile, fullPage: true });
 
               const liveRaw = PNG.sync.read(readFileSync(liveFile));
@@ -329,7 +331,7 @@ jobs:
           const imgs = [
             liveB64 ? `<div><div class="lbl">LIVE</div><img src="data:image/png;base64,${liveB64}"></div>` : '',
             diffB64 ? `<div><div class="lbl">DIFF — ${r.diffPercent}%</div><img src="data:image/png;base64,${diffB64}"></div>` : '',
-            rcB64   ? `<div><div class="lbl">RC (${TARGET_ENV})</div><img src="data:image/png;base64,${rcB64}"></div>` : '',
+            rcB64   ? `<div><div class="lbl">Multidev (${TARGET_ENV})</div><img src="data:image/png;base64,${rcB64}"></div>` : '',
           ].filter(Boolean).join('');
 
           const diffCell = r.error
@@ -374,7 +376,7 @@ jobs:
         <p class="meta">
           <strong>Site:</strong> ${PANTHEON_SITE} &nbsp;·&nbsp;
           <strong>Env:</strong> ${TARGET_ENV} vs live &nbsp;·&nbsp;
-          <strong>RC:</strong> <a href="${RC_URL}">${RC_URL}</a> &nbsp;·&nbsp;
+          <strong>Multidev:</strong> <a href="${RC_URL}">${RC_URL}</a> &nbsp;·&nbsp;
           <strong>Run:</strong> #${RUN_ID}
         </p>
         <div class="banner ${allPassed ? 'pass' : 'fail'}">
@@ -477,7 +479,7 @@ jobs:
             '',
             `[📊 View Full Report with Screenshots](${reportUrl})`,
             '',
-            `> RC: \`${targetEnv}\` — ${rcUrl}`,
+            `> Multidev: \`${targetEnv}\` — ${rcUrl}`,
           ].join('\n');
 
           await github.rest.issues.createComment({
@@ -522,7 +524,7 @@ jobs:
             rows,
             '',
             \`Environment : \${process.env.TARGET_ENV}\`,
-            \`RC URL      : \${process.env.MULTIDEV_URL}\`,
+            \`Multidev URL: \${process.env.MULTIDEV_URL}\`,
             \`Report      : \${process.env.REPORT_URL}\`,
           ].join('\n');
           console.log(text);
