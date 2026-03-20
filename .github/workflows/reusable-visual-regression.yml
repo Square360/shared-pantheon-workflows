@@ -391,7 +391,9 @@ jobs:
         <title>VRT · ${PANTHEON_SITE} · ${TARGET_ENV}</title>
         <style>
           body { font-family: sans-serif; padding: 2rem; max-width: 1600px; margin: 0 auto; }
-          h1   { margin-bottom: .25rem; }
+          .report-title { display: flex; align-items: baseline; gap: .6rem; margin-bottom: .25rem; }
+          .report-title img { width: 75px; height: 75px; vertical-align: baseline; position: relative; top: .15em; }
+          h1   { margin: 0; }
           .meta { color: #555; margin-bottom: 1.5rem; font-size: .9rem; }
           .banner { padding: 1rem; border-radius: 6px; margin-bottom: 2rem; font-size: 1.1rem; }
           .pass { background: #d4edda; color: #155724; }
@@ -409,7 +411,10 @@ jobs:
           footer { margin-top: 2rem; color: #888; font-size: .85rem; }
         </style></head>
         <body>
-        <h1>Visual Regression Test Report</h1>
+        <div class="report-title">
+          <img src="https://d17zcn6u0welhn.cloudfront.net/Square360-Assets/S360-logo-black-300.png" alt="Square360" width="75" height="75">
+          <h1>Square360 Visual Regression Test Report</h1>
+        </div>
         <p class="meta">
           <strong>Site:</strong> ${PANTHEON_SITE} &nbsp;·&nbsp;
           <strong>Env:</strong> ${TARGET_ENV} vs live &nbsp;·&nbsp;
