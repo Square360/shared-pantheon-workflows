@@ -92,7 +92,7 @@ visual_regression_test:
 ```
 
 ### 3. VRT config schema (per-repo, NOT managed by the composer plugin — preserved)
-**Path in each consuming repo:** `.github/workflows/vrt-config.yml`
+**Path in each consuming repo:** `.github/workflow_config/vrt-config.yml`
 
 ```yaml
 vrt:

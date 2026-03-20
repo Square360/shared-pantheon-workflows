@@ -67,7 +67,7 @@ jobs:
     # for a ClickUp-style ID (e.g. feature/ymac-959-my-feature → YMAC-959).
     #
     # Also parses an optional [vrt-pages]...[/vrt-pages] block for extra paths
-    # to test in addition to those in .github/workflows/vrt-config.yml:
+    # to test in addition to those in .github/workflow_config/vrt-config.yml:
     #
     #   [vrt-pages]
     #   /seasonal/christmas-sale
@@ -200,7 +200,7 @@ jobs:
         const PANTHEON_SITE   = process.env.PANTHEON_SITE || '';
         const EXTRA_PAGES_RAW = process.env.EXTRA_PAGES || '';
         const RUN_ID          = process.env.GITHUB_RUN_ID || 'local';
-        const CONFIG_PATH     = '.github/workflows/vrt-config.yml';
+        const CONFIG_PATH     = '.github/workflow_config/vrt-config.yml';
 
         const DEFAULT_CONFIG = {
           vrt: {
