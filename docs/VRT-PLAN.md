@@ -125,7 +125,7 @@ Single shared bucket, organized by site:
 ```
 s3://your-vrt-bucket/
   {pantheon_site}/
-    {pr-number}-{github_run_id}-{run_attempt}/
+    {target_env}-{github_run_id}-{run_attempt}/
       live/
         homepage-desktop.png
         homepage-mobile.png

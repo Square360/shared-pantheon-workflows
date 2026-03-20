@@ -183,7 +183,7 @@ jobs:
             threshold: 0.05,
             fail_on_diff: false,
             viewports: [
-              { width: 1440, height: 900,  name: 'desktop' },
+              { width: 1440, height: 2880, name: 'desktop' },
               { width: 390,  height: 844,  name: 'mobile'  },
             ],
             pages: [{ path: '/', name: 'homepage' }],
@@ -268,7 +268,7 @@ jobs:
             try {
               await page.goto(`${LIVE_URL}${pageConfig.path}`, { waitUntil: 'networkidle', timeout: 30000 });
               await page.waitForTimeout(6000);
-              await page.screenshot({ path: liveFile, fullPage: true });
+              await page.screenshot({ path: liveFile });
 
               await page.goto(`${RC_URL}${pageConfig.path}`, { waitUntil: 'networkidle', timeout: 30000 });
               await page.waitForTimeout(6000);
@@ -431,8 +431,7 @@ jobs:
         AWS_DEFAULT_REGION="${AWS_S3_REGION_INPUT:-us-east-1}"
         export AWS_DEFAULT_REGION
 
-        PR_NUMBER="${{ github.event.pull_request.number }}"
-        RUN_KEY="${PR_NUMBER}-${{ github.run_id }}-${{ github.run_attempt }}"
+        RUN_KEY="${{ inputs.target_env }}-${{ github.run_id }}-${{ github.run_attempt }}"
         S3_PREFIX="s3://${AWS_S3_BUCKET}/${PANTHEON_SITE}/${RUN_KEY}"
 
         aws s3 cp screenshots/live/ "${S3_PREFIX}/live/" --recursive --quiet
