@@ -7,10 +7,6 @@ on:
         description: 'Pantheon site machine name'
         required: true
         type: string
-      multidev_url:
-        description: 'Multidev URL to test (RC or PR environment)'
-        required: true
-        type: string
       target_env:
         description: 'Target environment name (e.g. rc-2025-12 or pr-42)'
         required: true
@@ -123,14 +119,28 @@ jobs:
         chmod +x /usr/local/bin/terminus
         terminus auth:login --machine-token="$TERMINUS_MACHINE_TOKEN"
 
-    - name: Get LIVE URL
-      id: live_url
+    - name: Get site URLs
+      id: get_urls
       if: steps.vrt_check.outputs.enabled == 'true'
       run: |
-        URL=$(terminus env:view ${{ inputs.pantheon_site }}.live --print)
-        URL="${URL%/}"
-        echo "url=${URL}" >> "$GITHUB_OUTPUT"
-        echo "LIVE URL: ${URL}"
+        LIVE_URL=$(terminus env:view ${{ inputs.pantheon_site }}.live --print 2>/dev/null \
+          | grep -oE 'https?://[^[:space:]]+' | head -1 | tr -d '[:space:]')
+        RC_URL=$(terminus env:view ${{ inputs.pantheon_site }}.${{ inputs.target_env }} --print 2>/dev/null \
+          | grep -oE 'https?://[^[:space:]]+' | head -1 | tr -d '[:space:]')
+
+        if [[ -z "$LIVE_URL" ]]; then
+          echo "Error: could not get LIVE URL from Terminus for ${{ inputs.pantheon_site }}.live"
+          exit 1
+        fi
+        if [[ -z "$RC_URL" ]]; then
+          echo "Error: could not get RC URL from Terminus for ${{ inputs.pantheon_site }}.${{ inputs.target_env }}"
+          exit 1
+        fi
+
+        echo "live_url=${LIVE_URL}" >> "$GITHUB_OUTPUT"
+        echo "rc_url=${RC_URL}"     >> "$GITHUB_OUTPUT"
+        echo "LIVE URL : ${LIVE_URL}"
+        echo "RC URL   : ${RC_URL}"
 
     - name: Setup Node.js
       if: steps.vrt_check.outputs.enabled == 'true'
@@ -396,8 +406,8 @@ jobs:
       id: run_vrt
       if: steps.vrt_check.outputs.enabled == 'true'
       env:
-        LIVE_URL:       ${{ steps.live_url.outputs.url }}
-        RC_URL:         ${{ inputs.multidev_url }}
+        LIVE_URL:       ${{ steps.get_urls.outputs.live_url }}
+        RC_URL:         ${{ steps.get_urls.outputs.rc_url }}
         TARGET_ENV:     ${{ inputs.target_env }}
         PANTHEON_SITE:  ${{ inputs.pantheon_site }}
         EXTRA_PAGES:    ${{ steps.vrt_check.outputs.extra_pages }}
@@ -436,7 +446,7 @@ jobs:
       env:
         REPORT_URL:    ${{ steps.s3_upload.outputs.report_url }}
         TARGET_ENV:    ${{ inputs.target_env }}
-        MULTIDEV_URL:  ${{ inputs.multidev_url }}
+        MULTIDEV_URL:  ${{ steps.get_urls.outputs.rc_url }}
       with:
         script: |
           const fs         = require('fs');
