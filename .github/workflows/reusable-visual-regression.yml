@@ -532,6 +532,7 @@ jobs:
     # Skipped gracefully if CLICKUP_API_TOKEN / CLICKUP_TEAM_ID are not configured.
     - name: Comment on ClickUp task
       if: >
+        false &&
         steps.vrt_check.outputs.enabled == 'true' &&
         steps.run_vrt.conclusion == 'success' &&
         steps.vrt_check.outputs.clickup_task_id != ''
