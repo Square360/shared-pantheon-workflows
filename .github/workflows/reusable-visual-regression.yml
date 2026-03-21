@@ -124,7 +124,7 @@ jobs:
           | sed -n '/\[vrt-pages\]/,/\[\/vrt-pages\]/p' \
           | grep -E '^\s*/' \
           | sed 's/^\s*//' \
-          | paste -sd '|' -)
+          | paste -sd '|' - || true)
         echo "extra_pages=${EXTRA_PAGES}" >> "$GITHUB_OUTPUT"
         if [[ -n "$EXTRA_PAGES" ]]; then
           echo "Extra pages from PR body: ${EXTRA_PAGES}"

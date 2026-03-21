@@ -24,3 +24,4 @@ package-lock.json
 *.code-workspace
 .env
 .claude
+/_working
