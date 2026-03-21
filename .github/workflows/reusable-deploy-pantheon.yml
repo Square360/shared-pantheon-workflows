@@ -181,7 +181,7 @@ jobs:
         fi
 
         # Always run cache rebuild last
-        terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- cr -y
+        terminus -n env:clear-cache ${{ inputs.pantheon_site }}.${{ inputs.target_env }}
 
     - name: Get environment URL
       id: env_url
