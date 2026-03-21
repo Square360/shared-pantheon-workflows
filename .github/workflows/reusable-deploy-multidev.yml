@@ -164,15 +164,17 @@ jobs:
         if [[ "$PR_TITLE" == *"[config-first]"* ]]; then
           echo "🔧 Running config import first (detected [config-first] tag)"
           terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- cim -y
+          terminus -n env:clear-cache ${{ inputs.pantheon_site }}.${{ inputs.target_env }}
           terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- updb -y
         else
           echo "🔧 Running database update first (default order)"
           terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- updb -y
+          terminus -n env:clear-cache ${{ inputs.pantheon_site }}.${{ inputs.target_env }}
           terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- cim -y
         fi
 
         # Always run cache rebuild last
-        terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- cr -y
+        terminus -n env:clear-cache ${{ inputs.pantheon_site }}.${{ inputs.target_env }}
 
     - name: Get multidev URL
       id: multidev_url

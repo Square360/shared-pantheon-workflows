@@ -155,7 +155,7 @@ jobs:
         TERMINUS_MACHINE_TOKEN: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
       run: |
         echo "Creating backup on live"
-        terminus -n drush ${{ inputs.pantheon_site }}.live -- cr
+        terminus -n env:clear-cache ${{ inputs.pantheon_site }}.live
         terminus -n backup:create "${{ inputs.pantheon_site }}.live" --keep-for=30 --no-interaction --quiet --yes
 
     - name: Run config imports and db updates
@@ -173,15 +173,17 @@ jobs:
         if [[ "$PR_TITLE" == *"[config-first]"* ]]; then
           echo "🔧 Running config import first (detected [config-first] tag)"
           terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- cim -y
+          terminus -n env:clear-cache ${{ inputs.pantheon_site }}.${{ inputs.target_env }}
           terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- updb -y
         else
           echo "🔧 Running database update first (default order)"
           terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- updb -y
+          terminus -n env:clear-cache ${{ inputs.pantheon_site }}.${{ inputs.target_env }}
           terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- cim -y
         fi
 
         # Always run cache rebuild last
-        terminus -n drush ${{ inputs.pantheon_site }}.${{ inputs.target_env }} -- cr -y
+        terminus -n env:clear-cache ${{ inputs.pantheon_site }}.${{ inputs.target_env }}
 
     - name: Get environment URL
       id: env_url
