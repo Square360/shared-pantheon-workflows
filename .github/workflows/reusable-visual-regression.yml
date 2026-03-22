@@ -117,14 +117,17 @@ jobs:
         echo "clickup_task_id=${TASK_ID}" >> "$GITHUB_OUTPUT"
         echo "ClickUp task ID: ${TASK_ID:-none}"
 
-        # Extract extra paths from the [vrt-pages]...[/vrt-pages] block
-        # (one absolute path per line, e.g. /seasonal/sale)
-        # Paths are pipe-separated in the output for easy splitting in Node.
+        # Extract extra paths from the [vrt-pages]...[/vrt-pages] block.
+        # Each line is an absolute path with an optional wait override after a pipe:
+        #   /seasonal/sale
+        #   /our-work|9        ← wait 9s on this page instead of the global default
+        # Entries are tab-separated in the output (tabs cannot appear in paths or
+        # wait values) so the pipe character stays available as the path/wait separator.
         EXTRA_PAGES=$(printf '%s' "$PR_BODY" \
           | sed -n '/\[vrt-pages\]/,/\[\/vrt-pages\]/p' \
           | grep -E '^\s*/' \
           | sed 's/^\s*//' \
-          | paste -sd '|' - || true)
+          | paste -sd $'\t' - || true)
         echo "extra_pages=${EXTRA_PAGES}" >> "$GITHUB_OUTPUT"
         if [[ -n "$EXTRA_PAGES" ]]; then
           echo "Extra pages from PR body: ${EXTRA_PAGES}"
@@ -234,14 +237,16 @@ jobs:
         const viewports   = config.vrt?.viewports    ?? DEFAULT_CONFIG.vrt.viewports;
         const pages       = [...(config.vrt?.pages   ?? DEFAULT_CONFIG.vrt.pages)];
 
-        // Merge extra paths from the [vrt-pages] block in the PR body
+        // Merge extra paths from the [vrt-pages] block in the PR body.
+        // Entries are tab-separated; each entry is /path or /path|waitSeconds.
         if (EXTRA_PAGES_RAW) {
-          for (const raw of EXTRA_PAGES_RAW.split('|').filter(Boolean)) {
-            const pagePath = raw.trim();
+          for (const raw of EXTRA_PAGES_RAW.split('\t').filter(Boolean)) {
+            const [pagePath, waitStr] = raw.trim().split('|');
             if (pagePath && !pages.find(p => p.path === pagePath)) {
               const slug = pagePath.replace(/^\//, '').replace(/\//g, '-') || 'root';
-              pages.push({ path: pagePath, name: slug });
-              console.log(`  + Extra page from PR body: ${pagePath}`);
+              const wait = waitStr ? parseInt(waitStr, 10) : undefined;
+              pages.push({ path: pagePath, name: slug, ...(wait ? { wait } : {}) });
+              console.log(`  + Extra page from PR body: ${pagePath}${wait ? ` (wait:${wait}s)` : ''}`);
             }
           }
         }
