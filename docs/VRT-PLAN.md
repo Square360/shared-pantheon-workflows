@@ -98,6 +98,7 @@ visual_regression_test:
 vrt:
   threshold: 0.05        # Max acceptable diff ratio (0.0–1.0); default 0.05
   fail_on_diff: false    # Whether to fail the workflow job on threshold breach
+  wait: 6                # Default seconds to wait after networkidle before screenshotting; default 6
   viewports:
     - width: 1440
       height: 900
@@ -112,6 +113,7 @@ vrt:
       name: about-us
     - path: /contact
       name: contact
+      wait: 12           # Per-page override — useful for pages with heavy animations or lazy-loaded content
 ```
 
 ---
