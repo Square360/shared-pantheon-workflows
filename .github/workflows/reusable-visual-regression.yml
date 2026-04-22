@@ -837,6 +837,13 @@ jobs:
           if (process.env.REPORT_JSON_URL) {
             lines.push(\`JSON report : \${process.env.REPORT_JSON_URL}\`);
           }
+          lines.push(
+            '',
+            '---',
+            'VRT interpretation note:',
+            'Visual Regression Test results are data points, not automatic pass or fail decisions. Content-driven differences such as dates, events, stories, and feed updates are often expected.',
+            'Reviewers should prioritize unintended structural or styling regressions, layout shifts, accessibility-impacting changes, and interaction breakage.',
+          );
           console.log(lines.join('\n'));
         ")
 
@@ -919,6 +926,9 @@ jobs:
           REPORT_JSON_FIELD=",{\"title\": \"AI-readable JSON\", \"value\": \"<${REPORT_JSON_URL}|report.json>\", \"short\": false}"
         fi
 
+        # Always-on interpretation note so reviewers don't treat every diff as a regression.
+        NOTE_FIELD=",{\"title\": \"VRT interpretation note\", \"value\": \"Visual Regression Test results are data points, not automatic pass or fail decisions. Content-driven differences such as dates, events, stories, and feed updates are often expected.\\n\\nReviewers should prioritize unintended structural or styling regressions, layout shifts, accessibility-impacting changes, and interaction breakage.\", \"short\": false}"
+
         curl -X POST -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
           -H 'Content-type: application/json; charset=utf-8' \
           --data "{
@@ -933,6 +943,7 @@ jobs:
                 ${PR_FIELD}
                 ${REPORT_FIELD}
                 ${REPORT_JSON_FIELD}
+                ${NOTE_FIELD}
               ],
               \"footer\": \"GitHub Actions\",
               \"ts\": $(date +%s)
