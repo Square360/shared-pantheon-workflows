@@ -1,3 +1,9 @@
+# Release 4.1.3 (2026-07-11)
+
+### Bug Fixes
+
+* pantheon: bump internal composite-action refs to v4.1.2 (1bd4fce)
+
 # Release 4.1.2 (2026-07-11)
 
 ### Bug Fixes
