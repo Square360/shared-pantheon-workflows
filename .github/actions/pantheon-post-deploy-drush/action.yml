@@ -56,6 +56,46 @@ runs:
           sleep 2
         done
 
+    # The bootstrap probe above proves Drupal ANSWERS, not that it answers
+    # from the commit this job pushed — an env still serving the previous
+    # artifact bootstraps happily, drush deploy runs config:import against
+    # the OLD config/sync tree, and the deploy reports success having
+    # imported nothing (observed on a client epic multidev, 2026-07-11 —
+    # a 5,600-line views change sat at "config:status: Different" after a
+    # green deploy). Close that race: poll the env's git HEAD until it
+    # matches the artifact commit this job pushed — the same runner-HEAD
+    # SHA the pantheon-push verify step confirmed via ls-remote, now
+    # checked on the application container filesystem. Soft-fail on
+    # timeout, consistent with the bootstrap probe: a real push failure
+    # already failed the workflow back in pantheon-push.
+    - name: Wait for the pushed commit to reach the env filesystem
+      if: ${{ inputs.skip != 'true' }}
+      shell: bash
+      env:
+        TERMINUS_MACHINE_TOKEN: ${{ inputs.machine_token }}
+        SITE: ${{ inputs.site }}
+        ENV: ${{ inputs.env }}
+      run: |
+        EXPECTED=$(git rev-parse HEAD 2>/dev/null || true)
+        if [ -z "${EXPECTED}" ]; then
+          echo "::warning::Runner workspace is not a git checkout; skipping code-sync wait"
+          exit 0
+        fi
+        echo "Waiting for ${SITE}.${ENV} filesystem to reach ${EXPECTED}..."
+        MAX_ATTEMPTS=60
+        for i in $(seq 1 ${MAX_ATTEMPTS}); do
+          DEPLOYED=$(terminus -n drush "${SITE}.${ENV}" -- ev 'echo shell_exec("git rev-parse HEAD");' 2>/dev/null | tr -d '[:space:]' || true)
+          if [ "${DEPLOYED}" = "${EXPECTED}" ]; then
+            echo "✅ ${SITE}.${ENV} is serving ${EXPECTED} (attempt ${i})"
+            break
+          fi
+          if [ "$i" -eq "${MAX_ATTEMPTS}" ]; then
+            echo "::warning::Timed out (~5min) waiting for ${SITE}.${ENV} to reach ${EXPECTED} (filesystem shows ${DEPLOYED:-unreadable}); proceeding — drush deploy may run against stale code"
+            break
+          fi
+          sleep 5
+        done
+
     - name: Run drush deploy
       if: ${{ inputs.skip != 'true' }}
       shell: bash
