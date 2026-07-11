@@ -105,7 +105,7 @@ jobs:
           PANTHEON_SSH_KEY: op://s360-cicd/pantheon/ssh-key
 
       - name: Install Terminus
-        uses: Square360/shared-workflows/.github/actions/terminus-install@v4.0.0-beta.1
+        uses: Square360/shared-workflows/.github/actions/terminus-install@cc16b90cacffc2fe7deac1c618a4dd725bd7525c  # v4.1.2
         with:
           machine_token: ${{ env.PANTHEON_MACHINE_TOKEN }}
 
@@ -115,7 +115,7 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Push code to Pantheon DEV
         id: deploy_pantheon
-        uses: Square360/shared-workflows/.github/actions/pantheon-push@v4.0.0-beta.1
+        uses: Square360/shared-workflows/.github/actions/pantheon-push@cc16b90cacffc2fe7deac1c618a4dd725bd7525c  # v4.1.2
         with:
           site: ${{ inputs.pantheon_site }}
           target_env: dev
@@ -172,7 +172,7 @@ jobs:
 
       - name: Run post-deploy drush commands
         id: drush_commands
-        uses: Square360/shared-workflows/.github/actions/pantheon-post-deploy-drush@v4.0.0-beta.1
+        uses: Square360/shared-workflows/.github/actions/pantheon-post-deploy-drush@cc16b90cacffc2fe7deac1c618a4dd725bd7525c  # v4.1.2
         with:
           site: ${{ inputs.pantheon_site }}
           env: dev
