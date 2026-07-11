@@ -1,3 +1,9 @@
+# Release 4.1.2 (2026-07-11)
+
+### Bug Fixes
+
+* pantheon: wait for pushed commit to reach env filesystem before drush deploy (a9de69c)
+
 # Release 4.1.1 (2026-07-01)
 
 ### Bug Fixes
