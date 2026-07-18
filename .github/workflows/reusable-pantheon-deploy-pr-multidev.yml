@@ -9,11 +9,20 @@ name: Reusable Deploy to PR Multidev (Pantheon)
 #   - ClickUp comment label: "WIP Multidev"
 #   - GitHub PR comment with the multidev URL
 #   - Security scan: opt-in via [run-security] (or legacy [security]) in PR body
-#   - VRT: opt-in via [run-vrt] (or legacy [vrt]) in PR body
+#   - VRT: opt-in via the --run-vrt PR label (preferred) or [run-vrt]/[vrt] in PR body
 #
 # Opt-out flags in PR body:
-#   - [skip-multidev]: skip the multidev build entirely (static checks elsewhere still run)
-#   - [docs-only]:     skip multidev + security scan + VRT (no runtime test needed)
+#   - skip-multidev (label or [skip-multidev] body tag): skip the multidev build
+#     entirely (static checks elsewhere still run)
+#   - docs-only (label or [docs-only] body tag): skip multidev + security scan +
+#     VRT (no runtime test needed)
+#
+# Labels are live PR state: they work on every pull_request event (including
+# closed) and adding --run-vrt / --run-security to an open PR triggers a fresh run
+# by itself when the caller includes `labeled` in its pull_request trigger
+# types. Body tags are event-payload snapshots kept for back-compat — they must
+# exist at event time (a body edit after the last push is invisible until the
+# next event).
 # -----------------------------------------------------------------------------
 
 on:
@@ -44,8 +53,25 @@ defaults:
 jobs:
   deploy_pr_multidev:
     name: Deploy to PR Multidev
-    # Skip if the developer opted out via [skip-multidev] or [docs-only] in PR body.
-    if: ${{ !contains(github.event.pull_request.body, '[skip-multidev]') && !contains(github.event.pull_request.body, '[docs-only]') }}
+    # Skip if the developer opted out via the --skip-multidev / --docs-only PR labels
+    # (preferred — live state) or the legacy [skip-multidev] / [docs-only] body tags.
+    # labeled-event guard: a `labeled` event starts a run only when the added label
+    # is one of the opt-in labels (--run-vrt / --run-security) on a still-open PR —
+    # any other label addition is a no-op for this workflow.
+    if: >-
+      ${{
+        !contains(github.event.pull_request.labels.*.name, '--skip-multidev') &&
+        !contains(github.event.pull_request.labels.*.name, '--docs-only') &&
+        !contains(github.event.pull_request.body, '[skip-multidev]') &&
+        !contains(github.event.pull_request.body, '[docs-only]') &&
+        (
+          github.event.action != 'labeled' ||
+          (
+            github.event.pull_request.state == 'open' &&
+            (github.event.label.name == '--run-vrt' || github.event.label.name == '--run-security')
+          )
+        )
+      }}
     permissions:
       deployments: write
       contents: write
@@ -222,9 +248,12 @@ jobs:
   security_scan:
     name: Security Scan (opt-in)
     needs: deploy_pr_multidev
-    # Opt-in via new [run-security] flag; legacy [security] still accepted during transition.
+    # Opt-in via the --run-security PR label (preferred — live state, one-click
+    # re-trigger via the labeled event) or the legacy [run-security]/[security]
+    # body tags.
     if: >-
       ${{
+        contains(github.event.pull_request.labels.*.name, '--run-security') ||
         contains(github.event.pull_request.body, '[run-security]') ||
         contains(github.event.pull_request.body, '[security]')
       }}
@@ -239,9 +268,11 @@ jobs:
   visual_regression:
     name: Visual Regression (opt-in)
     needs: deploy_pr_multidev
-    # Opt-in via new [run-vrt] flag; legacy [vrt] still accepted during transition.
+    # Opt-in via the --run-vrt PR label (preferred — live state, one-click
+    # re-trigger via the labeled event) or the legacy [run-vrt]/[vrt] body tags.
     if: >-
       ${{
+        contains(github.event.pull_request.labels.*.name, '--run-vrt') ||
         contains(github.event.pull_request.body, '[run-vrt]') ||
         contains(github.event.pull_request.body, '[vrt]')
       }}

@@ -11,10 +11,11 @@ name: Reusable Deploy to RC Multidev (Pantheon)
 #   - ClickUp comment: skipped (rc-multidev triggers are push events, no PR
 #                      context to extract a task ID from)
 #   - Security scan: MANDATORY (force_run=true). The release-candidate gate.
-#   - VRT: opt-in via [run-vrt] (or legacy [vrt]) in the PR body (when the
-#          caller triggers on the merged-PR closed event) or the merge commit
-#          message on develop (when the caller triggers on push). Both
-#          channels are checked; the absent one is null-safe.
+#   - VRT: opt-in via the --run-vrt PR label (preferred; present on the merged-PR
+#          closed payload), the [run-vrt]/[vrt] PR-body tags, or the merge
+#          commit message on develop (push wiring). All channels are checked;
+#          absent ones are null-safe. The label must be on the PR by merge
+#          time — the RC path runs once, at the closed event.
 #
 # No skip-multidev / docs-only gating here — those are PR-body flags. A push
 # to develop is the post-merge state; the developer can't opt out at this point.
@@ -175,14 +176,16 @@ jobs:
   visual_regression:
     name: Visual Regression (opt-in)
     needs: deploy_rc_multidev
-    # Opt-in via [run-vrt] (or legacy [vrt]) in the PR body OR the merge/head
-    # commit message. Callers trigger this workflow from two different event
-    # topologies: a push to develop (head_commit populated, no PR payload) or
-    # a merged-PR closed event (PR payload populated, head_commit null).
-    # Checking both channels makes the opt-in work in either wiring —
-    # contains() on the absent field is null-safe and simply yields false.
+    # Opt-in via the --run-vrt PR label (preferred — labels ride the payload of
+    # every pull_request event including closed), the [run-vrt]/[vrt] PR-body
+    # tags, OR the merge/head commit message. Callers trigger this workflow
+    # from two event topologies: a push to develop (head_commit populated, no
+    # PR payload) or a merged-PR closed event (PR payload populated,
+    # head_commit null). Checking all channels makes the opt-in work in either
+    # wiring — contains() on an absent field is null-safe and yields false.
     if: >-
       ${{
+        contains(github.event.pull_request.labels.*.name, '--run-vrt') ||
         contains(github.event.pull_request.body, '[run-vrt]') ||
         contains(github.event.pull_request.body, '[vrt]') ||
         contains(github.event.head_commit.message, '[run-vrt]') ||
