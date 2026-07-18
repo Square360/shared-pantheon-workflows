@@ -1,3 +1,9 @@
+# Release 4.1.4 (2026-07-18)
+
+### Bug Fixes
+
+* RC multidev VRT opt-in never fires on merged-PR triggers (17b9783)
+
 # Release 4.1.3 (2026-07-11)
 
 ### Bug Fixes
