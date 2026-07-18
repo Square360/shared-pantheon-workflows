@@ -11,9 +11,10 @@ name: Reusable Deploy to RC Multidev (Pantheon)
 #   - ClickUp comment: skipped (rc-multidev triggers are push events, no PR
 #                      context to extract a task ID from)
 #   - Security scan: MANDATORY (force_run=true). The release-candidate gate.
-#   - VRT: opt-in via [run-vrt] (or legacy [vrt]) in the merge commit message
-#          on develop. Mirrors the PR multidev's PR-body flag — since RC is
-#          triggered by a push, the commit message is the equivalent channel.
+#   - VRT: opt-in via [run-vrt] (or legacy [vrt]) in the PR body (when the
+#          caller triggers on the merged-PR closed event) or the merge commit
+#          message on develop (when the caller triggers on push). Both
+#          channels are checked; the absent one is null-safe.
 #
 # No skip-multidev / docs-only gating here — those are PR-body flags. A push
 # to develop is the post-merge state; the developer can't opt out at this point.
@@ -174,11 +175,16 @@ jobs:
   visual_regression:
     name: Visual Regression (opt-in)
     needs: deploy_rc_multidev
-    # Opt-in via [run-vrt] (or legacy [vrt]) in the merge commit message.
-    # No PR body exists on a push-to-develop trigger, so the commit message
-    # is the equivalent channel to the PR multidev's PR-body flag.
+    # Opt-in via [run-vrt] (or legacy [vrt]) in the PR body OR the merge/head
+    # commit message. Callers trigger this workflow from two different event
+    # topologies: a push to develop (head_commit populated, no PR payload) or
+    # a merged-PR closed event (PR payload populated, head_commit null).
+    # Checking both channels makes the opt-in work in either wiring —
+    # contains() on the absent field is null-safe and simply yields false.
     if: >-
       ${{
+        contains(github.event.pull_request.body, '[run-vrt]') ||
+        contains(github.event.pull_request.body, '[vrt]') ||
         contains(github.event.head_commit.message, '[run-vrt]') ||
         contains(github.event.head_commit.message, '[vrt]')
       }}
