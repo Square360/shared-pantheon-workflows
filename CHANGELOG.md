@@ -1,3 +1,10 @@
+# Release 4.2.0 (2026-07-18)
+
+### Features
+
+* double-hyphen label convention (--run-vrt et al) for picker grouping (91904ad)
+* label-based opt-ins for VRT, security scan, and multidev skip flags (fb7eda0)
+
 # Release 4.1.4 (2026-07-18)
 
 ### Bug Fixes
