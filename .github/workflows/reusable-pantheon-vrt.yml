@@ -44,17 +44,19 @@ jobs:
     steps:
 
     # -------------------------------------------------------------------------
-    # Step 1: Parse [run-vrt] tag from the PR body.
+    # Step 1: Detect the VRT opt-in.
     #
-    # Detects (both flag names supported for back-compat):
-    #   [run-vrt]              — run VRT, no ClickUp comment
-    #   [run-vrt YMAC-959]     — run VRT, post results to that ClickUp task
-    #   [vrt]                  — legacy alias for [run-vrt]
-    #   [vrt YMAC-959]         — legacy alias for [run-vrt YMAC-959]
+    # Channels, in order of preference (any one enables the run):
+    #   --run-vrt PR label     — canonical; live state, one-click re-trigger
+    #   [run-vrt] / [vrt]      — legacy PR-body tags (accepted indefinitely)
+    #   [run-vrt] / [vrt]      — commit-message tags (RC push topology, where
+    #                            no PR payload exists)
+    #   [run-vrt YMAC-959]     — body tag with ClickUp task: post results there
     #
-    # The new canonical flag is [run-vrt] (matches the [run-X] / [skip-X] /
-    # [X-only] convention documented in the SOP). [vrt] is accepted indefinitely
-    # so existing PRs and developer muscle memory don't break.
+    # The calling deploy workflows gate the VRT job on the same channels, so
+    # this step is a belt-and-suspenders re-check — it MUST accept every
+    # channel the callers accept, or a caller-triggered run silently no-ops
+    # (that was the v4.2.0 bug: callers learned labels, this step didn't).
     #
     # If no explicit task ID is found, falls back to scanning the branch name
     # for a ClickUp-style ID (e.g. ymac-959-my-feature → YMAC-959).
@@ -70,10 +72,12 @@ jobs:
     # The [vrt-pages] block keeps its original name regardless of which run
     # flag is used — it's a content selector, not a run trigger.
     # -------------------------------------------------------------------------
-    - name: Parse [run-vrt] tag from PR body
+    - name: Detect VRT opt-in (label or legacy tags)
       id: vrt_check
       env:
         PR_BODY: ${{ github.event.pull_request.body }}
+        HAS_LABEL: ${{ contains(github.event.pull_request.labels.*.name, '--run-vrt') }}
+        HAS_COMMIT_TAG: ${{ contains(github.event.head_commit.message, '[run-vrt]') || contains(github.event.head_commit.message, '[vrt]') }}
       run: |
         FORCE_RUN="${{ inputs.force_run }}"
 
@@ -89,14 +93,22 @@ jobs:
           exit 0
         fi
 
-        if [[ -z "$PR_BODY" ]] || ! echo "$PR_BODY" | grep -qP '\[(run-vrt|vrt)\b'; then
-          echo "No [run-vrt] or [vrt] tag found in PR body — skipping VRT"
+        HAS_BODY_TAG=false
+        if [[ -n "$PR_BODY" ]] && echo "$PR_BODY" | grep -qP '\[(run-vrt|vrt)\b'; then
+          HAS_BODY_TAG=true
+        fi
+
+        if [[ "$HAS_LABEL" != "true" && "$HAS_COMMIT_TAG" != "true" && "$HAS_BODY_TAG" != "true" ]]; then
+          echo "No --run-vrt label, [run-vrt]/[vrt] body tag, or commit-message tag found — skipping VRT"
           echo "enabled=false" >> "$GITHUB_OUTPUT"
           exit 0
         fi
 
         echo "enabled=true" >> "$GITHUB_OUTPUT"
-        echo "[run-vrt] tag detected (or legacy [vrt])"
+        [[ "$HAS_LABEL" == "true" ]] && echo "--run-vrt label detected"
+        [[ "$HAS_BODY_TAG" == "true" ]] && echo "[run-vrt] body tag detected (legacy)"
+        [[ "$HAS_COMMIT_TAG" == "true" ]] && echo "[run-vrt] commit-message tag detected"
+        true
 
         # Extract optional ClickUp task ID from the tag itself: [run-vrt YMAC-959] or [vrt YMAC-959]
         TASK_ID=$(echo "$PR_BODY" | grep -oP '\[(run-vrt|vrt)\s+([A-Z][A-Z0-9]+-[0-9]+)' | grep -oP '[A-Z][A-Z0-9]+-[0-9]+' | head -1 || true)
