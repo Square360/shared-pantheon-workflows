@@ -1,3 +1,9 @@
+# Release 4.2.1 (2026-07-18)
+
+### Bug Fixes
+
+* VRT reusable ignores the --run-vrt label its callers accept (0efd3ac)
+
 # Release 4.2.0 (2026-07-18)
 
 ### Features
