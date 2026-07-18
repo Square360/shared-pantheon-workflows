@@ -11,7 +11,7 @@ name: Reusable Deploy to RC Multidev (Pantheon)
 #   - ClickUp comment: skipped (rc-multidev triggers are push events, no PR
 #                      context to extract a task ID from)
 #   - Security scan: MANDATORY (force_run=true). The release-candidate gate.
-#   - VRT: opt-in via the run-vrt PR label (preferred; present on the merged-PR
+#   - VRT: opt-in via the --run-vrt PR label (preferred; present on the merged-PR
 #          closed payload), the [run-vrt]/[vrt] PR-body tags, or the merge
 #          commit message on develop (push wiring). All channels are checked;
 #          absent ones are null-safe. The label must be on the PR by merge
@@ -176,7 +176,7 @@ jobs:
   visual_regression:
     name: Visual Regression (opt-in)
     needs: deploy_rc_multidev
-    # Opt-in via the run-vrt PR label (preferred — labels ride the payload of
+    # Opt-in via the --run-vrt PR label (preferred — labels ride the payload of
     # every pull_request event including closed), the [run-vrt]/[vrt] PR-body
     # tags, OR the merge/head commit message. Callers trigger this workflow
     # from two event topologies: a push to develop (head_commit populated, no
@@ -185,7 +185,7 @@ jobs:
     # wiring — contains() on an absent field is null-safe and yields false.
     if: >-
       ${{
-        contains(github.event.pull_request.labels.*.name, 'run-vrt') ||
+        contains(github.event.pull_request.labels.*.name, '--run-vrt') ||
         contains(github.event.pull_request.body, '[run-vrt]') ||
         contains(github.event.pull_request.body, '[vrt]') ||
         contains(github.event.head_commit.message, '[run-vrt]') ||
