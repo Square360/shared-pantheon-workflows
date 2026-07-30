@@ -7,9 +7,16 @@ name: Reusable Satis Publish
 #
 # Contract (matches the SatisBoss /api endpoints):
 #   POST /api/build/trigger            -> 202 { buildId }  | 409 if a build is already running
+#                                         optional form field `package` (vendor/name) runs a
+#                                         targeted build: only that package's repository is
+#                                         rescanned/redumped | 422 if the package is unknown
 #   GET  /api/build/status/:buildId    -> { data: { status: pending|running|complete|failed, output, ... } }
 #   GET  /api/build/last               -> { data: { id, ... } }
 #   GET  /api/packages/:vendor/:name?version=X.Y.Z -> { has_version: bool, versions: [...] }
+#
+# When verify_package is set (the normal publish-on-tag case) the trigger is a
+# targeted build of that package. Pass full_rebuild: true to force the old
+# scan-everything behavior (needed after repo add/remove or settings changes).
 
 on:
   workflow_call:
@@ -39,6 +46,11 @@ on:
         required: false
         type: string
         default: ''
+      full_rebuild:
+        description: 'Force a full rebuild of every repository instead of a targeted build of verify_package.'
+        required: false
+        type: boolean
+        default: false
     secrets:
       OP_SERVICE_ACCOUNT_TOKEN:
         description: '1Password service account token — loads SATISBOSS_KEY from s360-cicd vault'
@@ -70,12 +82,19 @@ jobs:
         env:
           SATIS_URL: ${{ inputs.satis_url }}
           TOKEN: ${{ env.SATISBOSS_KEY }}
+          TARGET_PACKAGE: ${{ inputs.full_rebuild == true && '' || inputs.verify_package }}
         run: |
           set -euo pipefail
-          echo "POST $SATIS_URL/api/build/trigger"
-          http_code=$(curl -sS -o /tmp/trigger.json -w '%{http_code}' -X POST \
-            "$SATIS_URL/api/build/trigger" \
+          curl_args=(-sS -o /tmp/trigger.json -w '%{http_code}' -X POST
+            "$SATIS_URL/api/build/trigger"
             -H "Authorization: Bearer $TOKEN" -H "Accept: application/json")
+          if [ -n "$TARGET_PACKAGE" ]; then
+            echo "POST $SATIS_URL/api/build/trigger (targeted: $TARGET_PACKAGE)"
+            curl_args+=(--data-urlencode "package=$TARGET_PACKAGE")
+          else
+            echo "POST $SATIS_URL/api/build/trigger (full rebuild)"
+          fi
+          http_code=$(curl "${curl_args[@]}")
           echo "HTTP $http_code"; cat /tmp/trigger.json; echo
           case "$http_code" in
             202)
