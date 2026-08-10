@@ -303,6 +303,103 @@ jobs:
         cmd_options: '-I'
 
     # -------------------------------------------------------------------------
+    # Verify PII Disclosure (rule 10062) findings against the live page before
+    # they reach the severity gate.
+    #
+    # ZAP's Visa PAN pattern Luhn-matches digit runs inside Drupal's random
+    # per-render Views AJAX dom ids (views_dom_id: 64-char hex hash in
+    # drupalSettings), so any page embedding an AJAX view re-rolls the dice on
+    # every scan and the strict rc-* gate becomes a coin flip (S360-1015;
+    # first confirmed on cbey-d8 rc-2026-33). The report JSON carries only the
+    # bare evidence digits — no surrounding page context — so each 10062
+    # instance is verified against the live page instead:
+    #   - evidence absent on re-fetch → transient per-render token → drop
+    #     (a real PAN in page content persists across renders)
+    #   - every occurrence sits inside a ≥32-char hex token → dom-id
+    #     substring (edge cache served the scanned render) → drop
+    #   - anything else, including fetch failures → KEEP — fail-closed,
+    #     the gate fires exactly as before
+    # The untouched report is preserved as report_json.raw.json (the S3
+    # upload's report_*.json glob picks it up), and every dropped instance is
+    # logged as a ::notice. Real PAN/SSN detection stays live and gating —
+    # this is deliberately NOT a rules.tsv WARN downgrade of rule 10062.
+    # -------------------------------------------------------------------------
+    - name: Verify PII findings against live pages (ZAP rule 10062)
+      if: steps.sec_check.outputs.enabled == 'true'
+      run: |
+        REPORT=report_json.json
+        [[ -f "$REPORT" ]] || { echo "No ${REPORT} — nothing to verify"; exit 0; }
+        INSTANCES=$(jq '[.site[]?.alerts[]? | select(.pluginid == "10062") | (.instances // [])[]] | length' "$REPORT")
+        if [[ "$INSTANCES" -eq 0 ]]; then
+          echo "No PII Disclosure (10062) instances — nothing to verify"
+          exit 0
+        fi
+        echo "Verifying ${INSTANCES} PII Disclosure instance(s) against live pages..."
+        cp "$REPORT" report_json.raw.json
+
+        DROPS=$(mktemp)
+        jq -r '[.site[]?.alerts[]? | select(.pluginid == "10062") | (.instances // [])[]
+                | {uri: (.uri // ""), evidence: (.evidence // "")}] | unique
+                | .[] | [.uri, .evidence] | @tsv' "$REPORT" \
+        | while IFS=$'\t' read -r URI EVIDENCE; do
+          if [[ -z "$URI" || -z "$EVIDENCE" ]]; then
+            echo "::warning::10062 instance without uri/evidence — keeping (cannot verify)"
+            continue
+          fi
+          BODY_FILE=$(mktemp)
+          HTTP_STATUS=$(curl -sL --max-time 30 -o "$BODY_FILE" -w '%{http_code}' "$URI" || true)
+          if [[ "$HTTP_STATUS" != "200" ]]; then
+            echo "::warning::Re-fetch of ${URI} returned HTTP ${HTTP_STATUS:-error} — keeping 10062 instance (fail-closed)"
+            rm -f "$BODY_FILE"
+            continue
+          fi
+          BODY=$(cat "$BODY_FILE"); rm -f "$BODY_FILE"
+          if [[ -z "$BODY" ]]; then
+            echo "::warning::Re-fetch of ${URI} returned an empty body — keeping 10062 instance (fail-closed)"
+            continue
+          fi
+          TOTAL=$({ grep -oF "$EVIDENCE" <<<"$BODY" || true; } | { grep -c . || true; })
+          if [[ "$TOTAL" -eq 0 ]]; then
+            jq -cn --arg uri "$URI" --arg ev "$EVIDENCE" '{uri: $uri, evidence: $ev}' >> "$DROPS"
+            echo "::notice::Dropping 10062 on ${URI}: evidence \"${EVIDENCE}\" absent on re-fetch — transient per-render token (views_dom_id class)"
+            continue
+          fi
+          IN_HEX=$({ grep -oE '[0-9a-fA-F]{32,}' <<<"$BODY" || true; } | { grep -oF "$EVIDENCE" || true; } | { grep -c . || true; })
+          if [[ "$IN_HEX" -ge "$TOTAL" ]]; then
+            jq -cn --arg uri "$URI" --arg ev "$EVIDENCE" '{uri: $uri, evidence: $ev}' >> "$DROPS"
+            echo "::notice::Dropping 10062 on ${URI}: all ${TOTAL} occurrence(s) of \"${EVIDENCE}\" sit inside ≥32-char hex tokens — views_dom_id substring"
+          else
+            echo "::warning::Keeping 10062 on ${URI}: \"${EVIDENCE}\" appears outside hex-token context — potential real PII, will gate"
+          fi
+        done
+
+        if [[ ! -s "$DROPS" ]]; then
+          echo "No instances verified as false positives — report unchanged"
+          rm -f "$DROPS" report_json.raw.json
+          exit 0
+        fi
+        DROPPED=$(wc -l < "$DROPS" | tr -d ' ')
+        jq --argjson drops "$(jq -s '.' "$DROPS")" '
+          .site |= map(
+            .alerts |= (
+              map(
+                if .pluginid == "10062" then
+                  .instances = ((.instances // []) | map(
+                    . as $i
+                    | select(($drops | any(.uri == $i.uri and .evidence == $i.evidence)) | not)
+                  ))
+                  | .count = ((.instances | length) | tostring)
+                else . end
+              )
+              | map(select(.pluginid != "10062" or ((.instances // []) | length) > 0))
+            )
+          )
+        ' report_json.raw.json > "$REPORT"
+        REMAINING=$(jq '[.site[]?.alerts[]? | select(.pluginid == "10062") | (.instances // [])[]] | length' "$REPORT")
+        echo "PII verification: dropped ${DROPPED} verified-false-positive instance(s), kept ${REMAINING}; raw report preserved as report_json.raw.json"
+        rm -f "$DROPS"
+
+    # -------------------------------------------------------------------------
     # Summarise the ZAP JSON report into severity counts for use by the assert,
     # PR comment, ClickUp comment, and Slack notify steps.
     # -------------------------------------------------------------------------
