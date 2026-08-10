@@ -23,6 +23,57 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    # Pantheon's own signal for "code is deployed to the env's containers" is
+    # the platform workflow (Sync code / Create Multidev / Converge) that the
+    # git push kicked off. Gate on it first: wait until no workflow on the
+    # target env is still running. This absorbs the bulk of the settle time
+    # deterministically — however long Pantheon's queue takes is exactly how
+    # long we wait — instead of guessing with fixed sleeps. We gate on
+    # "any running workflow for this env" rather than name-matching
+    # descriptions ("Sync code on ..."), which Pantheon can reword; the cost
+    # is an occasional wait on an overlapping automated backup (~2min, rare).
+    # Soft-fail on timeout, consistent with the probes below — the probes and
+    # the drush-deploy retry backstop still stand behind this gate.
+    - name: Wait for Pantheon platform workflows on the env to finish
+      if: ${{ inputs.skip != 'true' }}
+      shell: bash
+      env:
+        TERMINUS_MACHINE_TOKEN: ${{ inputs.machine_token }}
+        SITE: ${{ inputs.site }}
+        ENV: ${{ inputs.env }}
+      run: |
+        echo "Waiting for Pantheon workflows on ${SITE}.${ENV} to finish..."
+        MAX_ATTEMPTS=60
+        for i in $(seq 1 ${MAX_ATTEMPTS}); do
+          # Count workflows for this env still in "running". Coerce jq/terminus
+          # failures to empty (not 0) so a transient API error keeps polling
+          # instead of passing the gate on bad data.
+          RUNNING=$(terminus workflow:list "${SITE}" --format=json 2>/dev/null \
+            | jq -r --arg env "${ENV}" \
+              '[.[] | select(.env == $env and .status == "running")] | length' \
+            2>/dev/null || true)
+          if [ "${RUNNING}" = "0" ]; then
+            echo "✅ No running Pantheon workflows on ${SITE}.${ENV} (attempt ${i})"
+            # Surface (don't fail on) a failed most-recent workflow: the push
+            # itself was already verified by pantheon-push's ls-remote check,
+            # and the probes below will catch an env that's actually broken.
+            LAST_STATUS=$(terminus workflow:list "${SITE}" --format=json 2>/dev/null \
+              | jq -r --arg env "${ENV}" \
+                '[.[] | select(.env == $env)] | sort_by(.started_at) | last | .status // empty' \
+              2>/dev/null || true)
+            if [ "${LAST_STATUS}" = "failed" ]; then
+              echo "::warning::Most recent Pantheon workflow on ${SITE}.${ENV} reports 'failed'; relying on bootstrap/code-sync probes to validate the env"
+            fi
+            break
+          fi
+          if [ "$i" -eq "${MAX_ATTEMPTS}" ]; then
+            echo "::warning::Timed out (~10min) waiting for Pantheon workflows on ${SITE}.${ENV} to finish (running: ${RUNNING:-unknown}); proceeding to probes"
+            break
+          fi
+          echo "  attempt ${i}/${MAX_ATTEMPTS}: ${RUNNING:-?} workflow(s) still running — sleeping 10s..."
+          sleep 10
+        done
+
     # After git-pushing a fresh build artifact to Pantheon, the new vendor/
     # and web/core/ trees take seconds-to-minutes to propagate to the env's
     # application container filesystem. If drush runs too early it bootstraps
@@ -65,9 +116,17 @@ runs:
     # green deploy). Close that race: poll the env's git HEAD until it
     # matches the artifact commit this job pushed — the same runner-HEAD
     # SHA the pantheon-push verify step confirmed via ls-remote, now
-    # checked on the application container filesystem. Soft-fail on
-    # timeout, consistent with the bootstrap probe: a real push failure
-    # already failed the workflow back in pantheon-push.
+    # checked on the application container filesystem.
+    #
+    # HEAD alone isn't enough: the ref can flip while vendor/ and web/core/
+    # files are still landing on the container, which is exactly the window
+    # where drush deploy dies on lazy-loaded classes (symfony/console
+    # ConsoleErrorEvent etc.). So also require a clean `git status
+    # --porcelain` — in git mode the code tree is clean at rest, so any
+    # dirt (modified/deleted paths, rsync temp files) means the sync is
+    # still in flight. Soft-fail on timeout, consistent with the bootstrap
+    # probe: a real push failure already failed the workflow back in
+    # pantheon-push.
     - name: Wait for the pushed commit to reach the env filesystem
       if: ${{ inputs.skip != 'true' }}
       shell: bash
@@ -81,16 +140,49 @@ runs:
           echo "::warning::Runner workspace is not a git checkout; skipping code-sync wait"
           exit 0
         fi
-        echo "Waiting for ${SITE}.${ENV} filesystem to reach ${EXPECTED}..."
+        echo "Waiting for ${SITE}.${ENV} filesystem to reach ${EXPECTED} with a clean tree..."
         MAX_ATTEMPTS=60
         for i in $(seq 1 ${MAX_ATTEMPTS}); do
-          DEPLOYED=$(terminus -n drush "${SITE}.${ENV}" -- ev 'echo shell_exec("git rev-parse HEAD");' 2>/dev/null | tr -d '[:space:]' || true)
-          if [ "${DEPLOYED}" = "${EXPECTED}" ]; then
-            echo "✅ ${SITE}.${ENV} is serving ${EXPECTED} (attempt ${i})"
+          PROBE=$(terminus -n drush "${SITE}.${ENV}" -- ev 'echo shell_exec("git rev-parse HEAD; git status --porcelain | wc -l");' 2>/dev/null || true)
+          DEPLOYED=$(echo "${PROBE}" | sed -n 1p | tr -d '[:space:]')
+          DIRTY=$(echo "${PROBE}" | sed -n 2p | tr -d '[:space:]')
+          if [ "${DEPLOYED}" = "${EXPECTED}" ] && [ "${DIRTY}" = "0" ]; then
+            echo "✅ ${SITE}.${ENV} is serving ${EXPECTED} with a clean tree (attempt ${i})"
             break
           fi
           if [ "$i" -eq "${MAX_ATTEMPTS}" ]; then
-            echo "::warning::Timed out (~5min) waiting for ${SITE}.${ENV} to reach ${EXPECTED} (filesystem shows ${DEPLOYED:-unreadable}); proceeding — drush deploy may run against stale code"
+            echo "::warning::Timed out (~5min) waiting for ${SITE}.${ENV} to reach ${EXPECTED} with a clean tree (filesystem shows ${DEPLOYED:-unreadable}, dirty paths: ${DIRTY:-unreadable}); proceeding — drush deploy may run against stale or partial code"
+            break
+          fi
+          sleep 5
+        done
+
+    # Third distinct failure mode: the network files mount (public://) coming
+    # online late on freshly-created multidevs. PhpStorage lives under the
+    # files mount on Pantheon, so cache:rebuild inside drush deploy hits
+    # "mkdir(): Permission denied" if the mount isn't writable yet — a
+    # different subsystem from code sync, invisible to both probes above.
+    # Probe it directly: write-then-delete a 1-byte dotfile in public://.
+    # temporary:// would probe the container-local /tmp and prove nothing
+    # about the mount. Soft-fail on timeout like the other gates.
+    - name: Wait for the env files mount to be writable
+      if: ${{ inputs.skip != 'true' }}
+      shell: bash
+      env:
+        TERMINUS_MACHINE_TOKEN: ${{ inputs.machine_token }}
+        SITE: ${{ inputs.site }}
+        ENV: ${{ inputs.env }}
+      run: |
+        echo "Waiting for ${SITE}.${ENV} public:// files mount to be writable..."
+        MAX_ATTEMPTS=30
+        for i in $(seq 1 ${MAX_ATTEMPTS}); do
+          RESULT=$(terminus -n drush "${SITE}.${ENV}" -- ev '$f = "public://.settle-probe"; if (@file_put_contents($f, "x") === FALSE) { echo "WRITE-FAIL"; } else { @unlink($f); echo "WRITE-OK"; }' 2>/dev/null || true)
+          if [ "${RESULT}" = "WRITE-OK" ]; then
+            echo "✅ ${SITE}.${ENV} files mount is writable (attempt ${i})"
+            break
+          fi
+          if [ "$i" -eq "${MAX_ATTEMPTS}" ]; then
+            echo "::warning::Timed out (~2.5min) waiting for ${SITE}.${ENV} files mount to be writable (probe: ${RESULT:-no output}); proceeding — cache:rebuild may hit PhpStorage permission errors"
             break
           fi
           sleep 5
@@ -119,18 +211,16 @@ runs:
           DEPLOY_FLAGS="-y -v"
         fi
 
-        # Even after the Drupal-bootstrap wait passes, drush can still hit
-        # transient failures while the appserver finishes settling: lazy-
-        # loaded classes not yet synced (symfony/console ConsoleErrorEvent,
-        # http-foundation Response, etc.), or PhpStorage mkdir() Permission
-        # Denied during cache:rebuild as the writable mounts come online.
-        # Heavy PRs (Drupal/Symfony security updates) widen this window and
-        # can outlast a single short retry, so we use progressive backoff:
-        # 30s → 60s → 180s (4 attempts, ~4.5min worst-case wait). `drush
-        # deploy` and `env:clear-cache` are both idempotent so retrying is
-        # safe even if an attempt partially succeeded — drush deploy's
-        # sub-commands (updb, cr, cim, deploy:hook) are each individually
-        # idempotent.
+        # The gates above (platform workflows finished, Drupal bootstraps,
+        # pushed commit present with a clean tree, files mount writable)
+        # cover every settling failure mode we've observed, so retries here
+        # should now be rare — a firing retry is a signal that a gate missed
+        # something and is worth investigating, not routine noise. Kept as a
+        # backstop with progressive backoff: 30s → 60s → 180s (4 attempts,
+        # ~4.5min worst-case wait). `drush deploy` and `env:clear-cache` are
+        # both idempotent so retrying is safe even if an attempt partially
+        # succeeded — drush deploy's sub-commands (updb, cr, cim,
+        # deploy:hook) are each individually idempotent.
         retry_drush() {
           local cmd_desc="$1"
           shift
