@@ -109,7 +109,7 @@ jobs:
         run: echo "target_env=pr-${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
 
       - name: Install Terminus
-        uses: Square360/shared-workflows/.github/actions/terminus-install@b06750721dc465786f84437e824a1fe7afeccc0b  # v4.2.2
+        uses: Square360/shared-workflows/.github/actions/terminus-install@4342823f58612cc70fba04424df7d78758493141  # v4.3.0
         with:
           machine_token: ${{ env.PANTHEON_MACHINE_TOKEN }}
 
@@ -131,7 +131,7 @@ jobs:
 
       - name: Push code to Pantheon multidev
         id: deploy
-        uses: Square360/shared-workflows/.github/actions/pantheon-push@b06750721dc465786f84437e824a1fe7afeccc0b  # v4.2.2
+        uses: Square360/shared-workflows/.github/actions/pantheon-push@4342823f58612cc70fba04424df7d78758493141  # v4.3.0
         with:
           site: ${{ inputs.pantheon_site }}
           target_env: ${{ steps.derive.outputs.target_env }}
@@ -142,7 +142,7 @@ jobs:
 
       - name: Run post-deploy drush commands
         id: drush_commands
-        uses: Square360/shared-workflows/.github/actions/pantheon-post-deploy-drush@b06750721dc465786f84437e824a1fe7afeccc0b  # v4.2.2
+        uses: Square360/shared-workflows/.github/actions/pantheon-post-deploy-drush@4342823f58612cc70fba04424df7d78758493141  # v4.3.0
         with:
           site: ${{ inputs.pantheon_site }}
           env: ${{ steps.derive.outputs.target_env }}
@@ -257,7 +257,7 @@ jobs:
         contains(github.event.pull_request.body, '[run-security]') ||
         contains(github.event.pull_request.body, '[security]')
       }}
-    uses: Square360/shared-workflows/.github/workflows/reusable-pantheon-security-scan.yml@b06750721dc465786f84437e824a1fe7afeccc0b  # v4.2.2
+    uses: Square360/shared-workflows/.github/workflows/reusable-pantheon-security-scan.yml@4342823f58612cc70fba04424df7d78758493141  # v4.3.0
     with:
       pantheon_site: ${{ inputs.pantheon_site }}
       target_env: ${{ needs.deploy_pr_multidev.outputs.target_env }}
@@ -276,7 +276,7 @@ jobs:
         contains(github.event.pull_request.body, '[run-vrt]') ||
         contains(github.event.pull_request.body, '[vrt]')
       }}
-    uses: Square360/shared-workflows/.github/workflows/reusable-pantheon-vrt.yml@b06750721dc465786f84437e824a1fe7afeccc0b  # v4.2.2
+    uses: Square360/shared-workflows/.github/workflows/reusable-pantheon-vrt.yml@4342823f58612cc70fba04424df7d78758493141  # v4.3.0
     with:
       pantheon_site: ${{ inputs.pantheon_site }}
       target_env: ${{ needs.deploy_pr_multidev.outputs.target_env }}
