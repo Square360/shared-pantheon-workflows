@@ -1,3 +1,9 @@
+# Release 4.3.1 (2026-08-11)
+
+### Bug Fixes
+
+* pin internal refs to v4.3.0 so the settle gates are reachable (e609935)
+
 # Release 4.3.0 (2026-08-11)
 
 ### Features
