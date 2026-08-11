@@ -1,3 +1,13 @@
+# Release 4.3.0 (2026-08-11)
+
+### Features
+
+* gate drush deploy on platform workflows, tree consistency, and files-mount readiness (f756cee)
+
+### Bug Fixes
+
+* raise settle-gate ceilings to 6min for large sites (81a519e)
+
 # Release 4.2.3 (2026-08-11)
 
 ### Bug Fixes
