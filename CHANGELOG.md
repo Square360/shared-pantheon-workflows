@@ -1,3 +1,9 @@
+# Release 4.2.3 (2026-08-11)
+
+### Bug Fixes
+
+* bump internal self-ref pins so shipped fixes actually run (529093f)
+
 # Release 4.2.2 (2026-08-11)
 
 ### Bug Fixes
