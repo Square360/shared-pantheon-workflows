@@ -94,14 +94,14 @@ runs:
         ENV: ${{ inputs.env }}
       run: |
         echo "Waiting for ${SITE}.${ENV} to settle after code push (full Drupal bootstrap probe)..."
-        MAX_ATTEMPTS=90
+        MAX_ATTEMPTS=180
         for i in $(seq 1 ${MAX_ATTEMPTS}); do
           if terminus -n drush "${SITE}.${ENV}" -- ev 'echo \Drupal::VERSION;' >/dev/null 2>&1; then
             echo "✅ ${SITE}.${ENV} drush+Drupal bootstrap is ready (attempt ${i})"
             break
           fi
           if [ "$i" -eq "${MAX_ATTEMPTS}" ]; then
-            echo "::warning::Timed out after ${MAX_ATTEMPTS} attempts (~3min) waiting for Drupal bootstrap on ${SITE}.${ENV}; proceeding anyway"
+            echo "::warning::Timed out after ${MAX_ATTEMPTS} attempts (~6min) waiting for Drupal bootstrap on ${SITE}.${ENV}; proceeding anyway"
             break
           fi
           sleep 2
@@ -141,7 +141,7 @@ runs:
           exit 0
         fi
         echo "Waiting for ${SITE}.${ENV} filesystem to reach ${EXPECTED} with a clean tree..."
-        MAX_ATTEMPTS=60
+        MAX_ATTEMPTS=72
         for i in $(seq 1 ${MAX_ATTEMPTS}); do
           PROBE=$(terminus -n drush "${SITE}.${ENV}" -- ev 'echo shell_exec("git rev-parse HEAD; git status --porcelain | wc -l");' 2>/dev/null || true)
           DEPLOYED=$(echo "${PROBE}" | sed -n 1p | tr -d '[:space:]')
@@ -151,7 +151,7 @@ runs:
             break
           fi
           if [ "$i" -eq "${MAX_ATTEMPTS}" ]; then
-            echo "::warning::Timed out (~5min) waiting for ${SITE}.${ENV} to reach ${EXPECTED} with a clean tree (filesystem shows ${DEPLOYED:-unreadable}, dirty paths: ${DIRTY:-unreadable}); proceeding — drush deploy may run against stale or partial code"
+            echo "::warning::Timed out (~6min) waiting for ${SITE}.${ENV} to reach ${EXPECTED} with a clean tree (filesystem shows ${DEPLOYED:-unreadable}, dirty paths: ${DIRTY:-unreadable}); proceeding — drush deploy may run against stale or partial code"
             break
           fi
           sleep 5
@@ -174,7 +174,7 @@ runs:
         ENV: ${{ inputs.env }}
       run: |
         echo "Waiting for ${SITE}.${ENV} public:// files mount to be writable..."
-        MAX_ATTEMPTS=30
+        MAX_ATTEMPTS=72
         for i in $(seq 1 ${MAX_ATTEMPTS}); do
           RESULT=$(terminus -n drush "${SITE}.${ENV}" -- ev '$f = "public://.settle-probe"; if (@file_put_contents($f, "x") === FALSE) { echo "WRITE-FAIL"; } else { @unlink($f); echo "WRITE-OK"; }' 2>/dev/null || true)
           if [ "${RESULT}" = "WRITE-OK" ]; then
@@ -182,7 +182,7 @@ runs:
             break
           fi
           if [ "$i" -eq "${MAX_ATTEMPTS}" ]; then
-            echo "::warning::Timed out (~2.5min) waiting for ${SITE}.${ENV} files mount to be writable (probe: ${RESULT:-no output}); proceeding — cache:rebuild may hit PhpStorage permission errors"
+            echo "::warning::Timed out (~6min) waiting for ${SITE}.${ENV} files mount to be writable (probe: ${RESULT:-no output}); proceeding — cache:rebuild may hit PhpStorage permission errors"
             break
           fi
           sleep 5
