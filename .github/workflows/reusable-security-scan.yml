@@ -257,7 +257,7 @@ jobs:
     # -------------------------------------------------------------------------
     # Run the OWASP ZAP baseline scan.
     #
-    # Action: zaproxy/action-baseline@v0.14.0 — actively maintained by the OWASP
+    # Action: zaproxy/action-baseline@v0.15.0 — actively maintained by the OWASP
     # ZAP project. Wraps zap-baseline.py inside an official ZAP Docker image
     # and emits report_html.html, report_md.md, report_json.json.
     #
@@ -269,7 +269,7 @@ jobs:
     - name: Run OWASP ZAP baseline scan
       id: run_zap
       if: steps.sec_check.outputs.enabled == 'true'
-      uses: zaproxy/action-baseline@v0.14.0
+      uses: zaproxy/action-baseline@v0.15.0
       with:
         target: ${{ steps.get_url.outputs.target_url }}
         fail_action: false
