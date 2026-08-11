@@ -1,3 +1,9 @@
+# Release 4.2.2 (2026-08-11)
+
+### Bug Fixes
+
+* bump node20-era action pins to node24-ready releases (69eaf3a)
+
 # Release 4.2.1 (2026-07-18)
 
 ### Bug Fixes
