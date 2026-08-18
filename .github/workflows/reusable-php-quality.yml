@@ -185,4 +185,5 @@ jobs:
 
       - name: Unit tests skipped (no-dev install)
         if: ${{ inputs.composer_no_dev }}
-        run: echo "::notice::unit tests skipped: composer_no_dev is true (dev dependencies not installed)"
+        run: |
+          echo "::notice::unit tests skipped: composer_no_dev is true (dev dependencies not installed)"
