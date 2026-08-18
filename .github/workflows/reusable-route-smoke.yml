@@ -1,0 +1,196 @@
+name: Reusable Route Smoke (authenticated key-route checks)
+
+# -----------------------------------------------------------------------------
+# Modeled on reusable-pantheon-security-scan.yml (same secrets pattern, same
+# LIVE refusal). Curls a per-repo list of key routes on a deployed multidev
+# through an authenticated session obtained via `drush uli`, and asserts each
+# route's HTTP status.
+#
+# Why: admin-only fatals are invisible to anonymous checks and to green CI —
+# the som.yale.edu 2026-08-18 outage (VBO 4.4.7 typed-signature fatal) 500'd
+# /admin/content for editors while the front end and every anonymous probe
+# stayed healthy. This workflow tests the real environment — real database,
+# real enabled modules — which no runner-built site can reproduce.
+#
+# Route list: `.github/smoke-routes.txt` in the consuming repo (override via
+# the routes_file input). One route per line, optional expected status
+# (defaults to 200). Blank lines and #-comments ignored.
+#
+# Recommended starting list — each line names what it exercises:
+#
+#     /admin/content              # content view + VBO action plugins
+#     /admin/content/media        # media VBO + media library
+#     /admin/people               # user VBO (third action-plugin surface)
+#     /admin/config               # renders every config-section menu link
+#     /admin/structure/views      # views UI listing / plugin discovery
+#     /admin/structure/types      # bundle list + entity handlers
+#     /admin/reports/status       # runs every module's requirements hooks
+#     /admin/reports/dblog        # watchdog UI
+#     /node/add                   # add-content bundle list
+#     /node/add/page              # full node form — field-widget fatals (per-repo bundle)
+#     / 200                       # anonymous front-page baseline
+#
+# Redirects are NOT followed on assertions — a 302-to-login where 200 is
+# expected means the session died, and that's a failure worth seeing.
+# Missing routes file → visible "skipped" notice, not a failure (same
+# rollout philosophy as reusable-php-quality: repos opt in by adding the file).
+#
+# Auth: `drush uli` mints a one-time login link (uid 1 unless uli_options
+# passes --name/--uid). The link is single-use, masked in logs, and the
+# session cookie lives only in the ephemeral runner. Pass
+# uli_options: '--name=<editor account>' for role-accurate checks.
+#
+# LIVE is refused, same as the ZAP scan: this workflow logs in with uli —
+# it has no business doing that on production. Call it after the deploy has
+# settled (see the settle gates in the deploy workflows, v4.4.x).
+# -----------------------------------------------------------------------------
+
+on:
+  workflow_call:
+    inputs:
+      pantheon_site:
+        description: 'Pantheon site machine name'
+        required: true
+        type: string
+      target_env:
+        description: 'Target environment name (e.g. rc-2026-34 or pr-42) — never live'
+        required: true
+        type: string
+      routes_file:
+        description: 'Path (in the consuming repo) to the route list'
+        required: false
+        type: string
+        default: '.github/smoke-routes.txt'
+      uli_options:
+        description: 'Extra options for drush uli (e.g. --name=smoke_editor for role-accurate checks; empty = uid 1)'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN:
+        required: true
+
+jobs:
+  route-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check route list exists
+        id: routes_check
+        run: |
+          if [ ! -f "${{ inputs.routes_file }}" ]; then
+            echo "::notice::route smoke skipped: no ${{ inputs.routes_file }} in this repo (add one to opt in)"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure 1Password
+        if: steps.routes_check.outputs.enabled == 'true'
+        uses: 1password/load-secrets-action/configure@v5
+        with:
+          service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+
+      - name: Load secrets
+        if: steps.routes_check.outputs.enabled == 'true'
+        uses: 1password/load-secrets-action@v5
+        with:
+          export-env: true
+        env:
+          PANTHEON_MACHINE_TOKEN: op://s360-cicd/pantheon/machine-token
+
+      - name: Install Terminus
+        if: steps.routes_check.outputs.enabled == 'true'
+        env:
+          TERMINUS_MACHINE_TOKEN: ${{ env.PANTHEON_MACHINE_TOKEN }}
+        run: |
+          TERMINUS_VERSION=$(curl -s https://api.github.com/repos/pantheon-systems/terminus/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+          curl -fsSL "https://github.com/pantheon-systems/terminus/releases/download/${TERMINUS_VERSION}/terminus.phar" \
+            -o /usr/local/bin/terminus
+          chmod +x /usr/local/bin/terminus
+          terminus auth:login --machine-token="$TERMINUS_MACHINE_TOKEN"
+
+      - name: Run route smoke
+        if: steps.routes_check.outputs.enabled == 'true'
+        env:
+          SITE: ${{ inputs.pantheon_site }}
+          TARGET_ENV: ${{ inputs.target_env }}
+          ROUTES_FILE: ${{ inputs.routes_file }}
+          ULI_OPTIONS: ${{ inputs.uli_options }}
+        run: |
+          if [[ "$TARGET_ENV" == "live" ]]; then
+            echo "::error::Refusing to run route smoke against LIVE. This workflow logs in via uli — multidev/test only."
+            exit 1
+          fi
+
+          # env:view may return a basic-auth-locked URL (https://user:pass@host).
+          # Split credentials out: curl gets them via -u, uli gets the clean
+          # base URL, and only the clean form is ever printed.
+          RAW_URL=$(terminus env:view "$SITE.$TARGET_ENV" --print 2>/dev/null \
+            | grep -oE 'https?://[^[:space:]]+' | head -1 | tr -d '[:space:]')
+          if [[ -z "$RAW_URL" ]]; then
+            echo "::error::Could not resolve URL for $SITE.$TARGET_ENV — does the environment exist?"
+            exit 1
+          fi
+          RAW_URL="${RAW_URL%/}"
+          TARGET_URL=$(echo "$RAW_URL" | sed -E 's#https?://[^@/]*@#https://#')
+          CURL_AUTH=()
+          if [[ "$RAW_URL" != "$TARGET_URL" ]]; then
+            CREDS=$(echo "$RAW_URL" | grep -oE '//[^@/]*@' | tr -d '/@')
+            echo "::add-mask::$CREDS"
+            CURL_AUTH=(-u "$CREDS")
+            echo "Environment is basic-auth locked."
+          fi
+          echo "Target: $TARGET_URL"
+
+          # Wake the environment (idle multidevs 502 the first request).
+          terminus env:wake "$SITE.$TARGET_ENV" >/dev/null 2>&1 || true
+
+          # One-time login link → session cookie. The link is a credential:
+          # mask it before anything can echo it. NOTE: uid 1 is blocked on
+          # hardened sites — pass uli_options: '--name=<account>' there; the
+          # landing check below catches a login that didn't stick.
+          LOGIN_URL=$(terminus drush "$SITE.$TARGET_ENV" -- uli --uri="$TARGET_URL" $ULI_OPTIONS 2>/dev/null | grep -oE 'https?://[^[:space:]]+' | tail -1)
+          if [[ -z "$LOGIN_URL" ]]; then
+            echo "::error::drush uli returned no login link (blocked account? bad --name in uli_options?)"
+            exit 1
+          fi
+          echo "::add-mask::$LOGIN_URL"
+          JAR=$(mktemp)
+          curl -sL "${CURL_AUTH[@]}" -c "$JAR" -b "$JAR" -o /dev/null "$LOGIN_URL"
+
+          # Session sanity: authenticated /user lands on /user/<uid>;
+          # anonymous bounces to /user/login. A dead session must fail here,
+          # not produce confusing per-route 403s.
+          LANDED=$(curl -s -o /dev/null -w '%{url_effective}' -L "${CURL_AUTH[@]}" -c "$JAR" -b "$JAR" "$TARGET_URL/user")
+          if [[ "$LANDED" == *"/user/login"* ]]; then
+            echo "::error::uli login did not stick — /user bounced to the login page"
+            exit 1
+          fi
+
+          FAIL=0
+          CHECKED=0
+          while IFS= read -r line; do
+            line="${line%%#*}"
+            line=$(echo "$line" | xargs || true)
+            [[ -z "$line" ]] && continue
+            ROUTE=$(echo "$line" | awk '{print $1}')
+            EXPECTED=$(echo "$line" | awk '{print $2}')
+            EXPECTED="${EXPECTED:-200}"
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' "${CURL_AUTH[@]}" -c "$JAR" -b "$JAR" "$TARGET_URL$ROUTE")
+            CHECKED=$((CHECKED+1))
+            if [[ "$CODE" == "$EXPECTED" ]]; then
+              echo "✓ $ROUTE → $CODE"
+            else
+              echo "::error::route smoke FAILED: $ROUTE expected $EXPECTED, got $CODE"
+              FAIL=1
+            fi
+          done < "$ROUTES_FILE"
+
+          rm -f "$JAR"
+          if [[ "$FAIL" == "1" ]]; then
+            echo "::error::route smoke: failures on $TARGET_URL ($CHECKED routes checked)"
+            exit 1
+          fi
+          echo "route smoke: $CHECKED routes clean on $TARGET_URL"
