@@ -1,3 +1,9 @@
+# Release 4.4.1 (2026-08-18)
+
+### Bug Fixes
+
+* ignore workspaces when installing semantic-release tooling (7e2a97f)
+
 # Release 4.4.0 (2026-08-18)
 
 ### Features
