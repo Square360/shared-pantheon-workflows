@@ -67,9 +67,17 @@ jobs:
           if [ -f package-lock.json ]; then
             npm ci
           fi
-          # --workspaces=false: don't resolve the project's workspace tree — npm
-          # chokes (EUNSUPPORTEDPROTOCOL) on yarn/pnpm "workspace:" ranges.
-          npm install --no-save --workspaces=false semantic-release @semantic-release/changelog @semantic-release/git @semantic-release/github @semantic-release/commit-analyzer @semantic-release/release-notes-generator conventional-changelog-conventionalcommits@^8.0.0
+          # Install the release tooling in an isolated prefix, NOT the project
+          # root: npm always resolves the root package.json's workspaces field
+          # when installing in the project, and errors (EUNSUPPORTEDPROTOCOL)
+          # on yarn/pnpm "workspace:" version ranges. (--workspaces=false does
+          # not prevent this — it only scopes command targeting.)
+          # semantic-release falls back to its own install tree for plugin
+          # resolution, so the plugins just need to be siblings in this prefix.
+          mkdir -p "$RUNNER_TEMP/semantic-release-tooling"
+          cd "$RUNNER_TEMP/semantic-release-tooling"
+          npm init -y > /dev/null
+          npm install --no-save semantic-release @semantic-release/changelog @semantic-release/git @semantic-release/github @semantic-release/commit-analyzer @semantic-release/release-notes-generator conventional-changelog-conventionalcommits@^8.0.0
 
       - name: Create semantic-release config
         run: |
@@ -213,10 +221,14 @@ jobs:
           unset GITHUB_HEAD_REF
           unset GITHUB_BASE_REF
 
+          # Run from the isolated tooling install (see "Install dependencies");
+          # cwd stays the project, so the computed .releaserc.js and
+          # custom-release-notes.cjs load normally.
+          semrel="$RUNNER_TEMP/semantic-release-tooling/node_modules/.bin/semantic-release"
           if ${{ inputs.dry_run }}; then
-            npx semantic-release --dry-run
+            "$semrel" --dry-run
           else
-            npx semantic-release
+            "$semrel"
           fi
         env:
           GITHUB_TOKEN: ${{ env.CI_GH_TOKEN }}
