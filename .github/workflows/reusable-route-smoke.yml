@@ -100,6 +100,16 @@ jobs:
           export-env: true
         env:
           PANTHEON_MACHINE_TOKEN: op://s360-cicd/pantheon/machine-token
+          PANTHEON_SSH_KEY: op://s360-cicd/pantheon/ssh-key
+
+      # terminus drush executes over SSH to the appserver — the machine token
+      # alone is not enough (first guinea-pig run: "Permission denied
+      # (publickey)" after a 5-minute terminus retry crawl).
+      - name: Load SSH key
+        if: steps.routes_check.outputs.enabled == 'true'
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ env.PANTHEON_SSH_KEY }}
 
       - name: Install Terminus
         if: steps.routes_check.outputs.enabled == 'true'
