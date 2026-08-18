@@ -1,3 +1,9 @@
+# Release 4.4.0 (2026-08-18)
+
+### Features
+
+* maintain moving major-version tags (v4, v5, …) on release (c504b13)
+
 # Release 4.3.2 (2026-08-18)
 
 ### Bug Fixes
