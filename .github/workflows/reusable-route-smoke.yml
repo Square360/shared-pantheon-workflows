@@ -170,7 +170,9 @@ jobs:
           # hardened sites — pass uli_options: '--name=<account>' there; the
           # landing check below catches a login that didn't stick.
           ULI_ERR=$(mktemp)
+          echo "[$SECONDS s] requesting uli link (cold multidevs can take minutes on first drush bootstrap)..."
           LOGIN_URL=$(terminus drush "$SITE.$TARGET_ENV" -- uli --uri="$TARGET_URL" $ULI_OPTIONS 2>"$ULI_ERR" | grep -oE 'https?://[^[:space:]]+' | tail -1)
+          echo "[$SECONDS s] uli returned"
           if [[ -z "$LOGIN_URL" ]]; then
             echo "::error::drush uli returned no login link (blocked account? bad --name in uli_options?). terminus/drush stderr follows:"
             sed 's/^/  /' "$ULI_ERR"
@@ -178,7 +180,15 @@ jobs:
           fi
           echo "::add-mask::$LOGIN_URL"
           JAR=$(mktemp)
-          curl -sL --max-time 30 "${CURL_AUTH[@]}" -c "$JAR" -b "$JAR" -o /dev/null "$LOGIN_URL"
+          # TLS on a freshly-provisioned multidev edge can flap — retry, and
+          # report the curl error instead of dying bare (exit 35 = SSL
+          # handshake, seen on the first TEDCO guinea-pig run).
+          if ! CURL_ERR=$(curl -sSL --max-time 30 --retry 4 --retry-delay 10 --retry-all-errors "${CURL_AUTH[@]}" -c "$JAR" -b "$JAR" -o /dev/null "$LOGIN_URL" 2>&1); then
+            RC=$?
+            echo "::error::login request failed after retries (curl exit $RC): $CURL_ERR"
+            exit 1
+          fi
+          echo "[$SECONDS s] session established"
 
           # Session sanity: authenticated /user lands on /user/<uid>;
           # anonymous bounces to /user/login. A dead session must fail here,
