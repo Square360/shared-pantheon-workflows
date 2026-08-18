@@ -61,7 +61,10 @@ jobs:
 
       - name: Install dependencies
         run: |
-          if [ -f package.json ]; then
+          # Only npm ci when an npm lockfile exists — yarn/pnpm repos have a
+          # package.json but no package-lock.json, and the release itself only
+          # needs the project install when local release-config plugins exist.
+          if [ -f package-lock.json ]; then
             npm ci
           fi
           npm install --no-save semantic-release @semantic-release/changelog @semantic-release/git @semantic-release/github @semantic-release/commit-analyzer @semantic-release/release-notes-generator conventional-changelog-conventionalcommits@^8.0.0
