@@ -66,6 +66,11 @@ on:
         required: false
         type: string
         default: ''
+      slack_channel:
+        description: 'Slack channel for FAILURE notifications only (quiet on green — the deploy notice already announces the env). Empty = no Slack.'
+        required: false
+        type: string
+        default: ''
     secrets:
       OP_SERVICE_ACCOUNT_TOKEN:
         required: true
@@ -101,6 +106,7 @@ jobs:
         env:
           PANTHEON_MACHINE_TOKEN: op://s360-cicd/pantheon/machine-token
           PANTHEON_SSH_KEY: op://s360-cicd/pantheon/ssh-key
+          SLACK_BOT_TOKEN: op://s360-cicd/slack/bot-token
 
       # terminus drush executes over SSH to the appserver — the machine token
       # alone is not enough (first guinea-pig run: "Permission denied
@@ -123,6 +129,7 @@ jobs:
           terminus auth:login --machine-token="$TERMINUS_MACHINE_TOKEN"
 
       - name: Run route smoke
+        id: smoke
         if: steps.routes_check.outputs.enabled == 'true'
         env:
           SITE: ${{ inputs.pantheon_site }}
@@ -197,13 +204,46 @@ jobs:
               echo "✓ $ROUTE → $CODE"
             else
               echo "::error::route smoke FAILED: $ROUTE expected $EXPECTED, got $CODE"
+              FAILED_LIST="${FAILED_LIST}${ROUTE} (expected ${EXPECTED}, got ${CODE})\n"
               FAIL=1
             fi
           done < "$ROUTES_FILE"
 
           rm -f "$JAR"
+          echo "failed_routes=${FAILED_LIST}" >> "$GITHUB_OUTPUT"
+          echo "checked=${CHECKED}" >> "$GITHUB_OUTPUT"
           if [[ "$FAIL" == "1" ]]; then
             echo "::error::route smoke: failures on $TARGET_URL ($CHECKED routes checked)"
             exit 1
           fi
           echo "route smoke: $CHECKED routes clean on $TARGET_URL"
+
+      # Failure-only by design: green smoke adds nothing actionable and the
+      # deploy's own Slack notice already announces the environment.
+      - name: Notify Slack on failure
+        if: >
+          failure() &&
+          steps.routes_check.outputs.enabled == 'true' &&
+          inputs.slack_channel != ''
+        env:
+          SLACK_BOT_TOKEN: ${{ env.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ inputs.slack_channel }}
+          SITE: ${{ inputs.pantheon_site }}
+          TARGET_ENV: ${{ inputs.target_env }}
+          FAILED_ROUTES: ${{ steps.smoke.outputs.failed_routes }}
+          CHECKED: ${{ steps.smoke.outputs.checked }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [[ -n "$FAILED_ROUTES" ]]; then
+            DETAIL=$(printf '%b' "$FAILED_ROUTES")
+          else
+            DETAIL="smoke run failed before route checks (uli/session/url stage) — see the run log"
+          fi
+          export SLACK_TEXT=$(printf ':rotating_light: *Route smoke FAILED* on `%s.%s` (%s routes checked)\n%s\n<%s|Run log>' "$SITE" "$TARGET_ENV" "${CHECKED:-0}" "$DETAIL" "$RUN_URL")
+          PAYLOAD=$(python3 -c 'import json,os; print(json.dumps({"channel": os.environ["SLACK_CHANNEL"], "text": os.environ["SLACK_TEXT"]}))')
+          curl -s --max-time 30 -X POST \
+            -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            --data "$PAYLOAD" \
+            https://slack.com/api/chat.postMessage >/dev/null || true
+
