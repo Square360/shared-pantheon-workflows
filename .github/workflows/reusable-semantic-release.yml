@@ -67,7 +67,9 @@ jobs:
           if [ -f package-lock.json ]; then
             npm ci
           fi
-          npm install --no-save semantic-release @semantic-release/changelog @semantic-release/git @semantic-release/github @semantic-release/commit-analyzer @semantic-release/release-notes-generator conventional-changelog-conventionalcommits@^8.0.0
+          # --workspaces=false: don't resolve the project's workspace tree — npm
+          # chokes (EUNSUPPORTEDPROTOCOL) on yarn/pnpm "workspace:" ranges.
+          npm install --no-save --workspaces=false semantic-release @semantic-release/changelog @semantic-release/git @semantic-release/github @semantic-release/commit-analyzer @semantic-release/release-notes-generator conventional-changelog-conventionalcommits@^8.0.0
 
       - name: Create semantic-release config
         run: |
