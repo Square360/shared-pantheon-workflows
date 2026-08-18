@@ -1,3 +1,9 @@
+# Release 4.4.2 (2026-08-18)
+
+### Bug Fixes
+
+* install release tooling in an isolated prefix (f4bfee5)
+
 # Release 4.4.1 (2026-08-18)
 
 ### Bug Fixes
