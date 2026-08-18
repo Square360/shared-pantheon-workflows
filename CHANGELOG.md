@@ -1,3 +1,9 @@
+# Release 4.3.2 (2026-08-18)
+
+### Bug Fixes
+
+* gate npm ci on package-lock.json, not package.json (825af59)
+
 # Release 4.3.1 (2026-08-11)
 
 ### Bug Fixes
