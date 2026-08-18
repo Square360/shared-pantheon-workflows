@@ -1,0 +1,39 @@
+name: Move major tag
+
+# Keep a moving major-version tag (v4, v5, …) pointed at the newest release so
+# callers can pin `uses: Square360/shared-workflows/...@v4` and receive every
+# non-breaking update without repinning. Breaking changes bump the major and
+# start a new moving tag, leaving existing callers untouched.
+#
+# This workflow is intentionally local to shared-workflows rather than part of
+# reusable-semantic-release.yml: the module repos it releases are Composer
+# packages, and Satis would index a bare `v4` tag on those as version 4.0.0.
+on:
+  release:
+    types: [published]
+
+jobs:
+  move_major_tag:
+    name: Point vMAJOR at the new release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Force-move major tag
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.release.tag_name }}"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Skipping '$tag' — not a plain vX.Y.Z release tag."
+            exit 0
+          fi
+          major="${tag%%.*}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # github.sha on a release event is the commit the release tag points at.
+          git tag -f "$major" "${{ github.sha }}"
+          git push --force origin "refs/tags/$major"
+          echo "$major now points at $tag (${{ github.sha }})"
