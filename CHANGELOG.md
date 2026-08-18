@@ -1,3 +1,9 @@
+# Release 4.4.3 (2026-08-18)
+
+### Bug Fixes
+
+* verify ZAP PII (10062) findings against live pages before the severity gate (523d079)
+
 # Release 4.4.2 (2026-08-18)
 
 ### Bug Fixes
