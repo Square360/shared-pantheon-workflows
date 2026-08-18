@@ -23,6 +23,7 @@ name: Reusable Route Smoke (authenticated key-route checks)
 #     /admin/people               # user VBO (third action-plugin surface)
 #     /admin/config               # renders every config-section menu link
 #     /admin/structure/views      # views UI listing / plugin discovery
+#     /admin/structure/menu       # menu list — entity-type alter handlers (2026-08-18 SOM incident)
 #     /admin/structure/types      # bundle list + entity handlers
 #     /admin/reports/status       # runs every module's requirements hooks
 #     /admin/reports/dblog        # watchdog UI
