@@ -73,6 +73,7 @@ on:
 jobs:
   route-smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
 
@@ -151,19 +152,21 @@ jobs:
           # mask it before anything can echo it. NOTE: uid 1 is blocked on
           # hardened sites — pass uli_options: '--name=<account>' there; the
           # landing check below catches a login that didn't stick.
-          LOGIN_URL=$(terminus drush "$SITE.$TARGET_ENV" -- uli --uri="$TARGET_URL" $ULI_OPTIONS 2>/dev/null | grep -oE 'https?://[^[:space:]]+' | tail -1)
+          ULI_ERR=$(mktemp)
+          LOGIN_URL=$(terminus drush "$SITE.$TARGET_ENV" -- uli --uri="$TARGET_URL" $ULI_OPTIONS 2>"$ULI_ERR" | grep -oE 'https?://[^[:space:]]+' | tail -1)
           if [[ -z "$LOGIN_URL" ]]; then
-            echo "::error::drush uli returned no login link (blocked account? bad --name in uli_options?)"
+            echo "::error::drush uli returned no login link (blocked account? bad --name in uli_options?). terminus/drush stderr follows:"
+            sed 's/^/  /' "$ULI_ERR"
             exit 1
           fi
           echo "::add-mask::$LOGIN_URL"
           JAR=$(mktemp)
-          curl -sL "${CURL_AUTH[@]}" -c "$JAR" -b "$JAR" -o /dev/null "$LOGIN_URL"
+          curl -sL --max-time 30 "${CURL_AUTH[@]}" -c "$JAR" -b "$JAR" -o /dev/null "$LOGIN_URL"
 
           # Session sanity: authenticated /user lands on /user/<uid>;
           # anonymous bounces to /user/login. A dead session must fail here,
           # not produce confusing per-route 403s.
-          LANDED=$(curl -s -o /dev/null -w '%{url_effective}' -L "${CURL_AUTH[@]}" -c "$JAR" -b "$JAR" "$TARGET_URL/user")
+          LANDED=$(curl -s -o /dev/null -w '%{url_effective}' -L --max-time 30 "${CURL_AUTH[@]}" -c "$JAR" -b "$JAR" "$TARGET_URL/user")
           if [[ "$LANDED" == *"/user/login"* ]]; then
             echo "::error::uli login did not stick — /user bounced to the login page"
             exit 1
@@ -178,7 +181,7 @@ jobs:
             ROUTE=$(echo "$line" | awk '{print $1}')
             EXPECTED=$(echo "$line" | awk '{print $2}')
             EXPECTED="${EXPECTED:-200}"
-            CODE=$(curl -s -o /dev/null -w '%{http_code}' "${CURL_AUTH[@]}" -c "$JAR" -b "$JAR" "$TARGET_URL$ROUTE")
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "${CURL_AUTH[@]}" -c "$JAR" -b "$JAR" "$TARGET_URL$ROUTE")
             CHECKED=$((CHECKED+1))
             if [[ "$CODE" == "$EXPECTED" ]]; then
               echo "✓ $ROUTE → $CODE"
