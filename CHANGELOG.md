@@ -1,3 +1,13 @@
+# Release 4.9.0 (2026-08-19)
+
+### Features
+
+* reusable-composer-diff — sticky PR comment for composer.lock changes (256814d)
+
+### Bug Fixes
+
+* bump nested route-smoke pins to v4.8.2 so the uli vars fallback is reachable (2421706)
+
 # Release 4.8.2 (2026-08-19)
 
 ### Bug Fixes
