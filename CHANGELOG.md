@@ -1,3 +1,13 @@
+# Release 4.8.2 (2026-08-19)
+
+### Bug Fixes
+
+* route-smoke: resolve uli account from ROUTE_SMOKE_ULI_OPTIONS repo/org variable (95bb525)
+
+### Chores
+
+* drop unrelated local diagram assets accidentally committed (4173ed1)
+
 # Release 4.8.1 (2026-08-19)
 
 ### Bug Fixes
