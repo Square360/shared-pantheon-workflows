@@ -1,3 +1,20 @@
+# Release 4.6.0 (2026-08-19)
+
+### Features
+
+* failure-only Slack notification (slack_channel input) (1026990)
+* reusable route-smoke workflow — authenticated key-route checks via drush uli (5b6e70e)
+
+### Bug Fixes
+
+* retry + report login-curl TLS failures, stage timing echoes (2e4f97d)
+* load Pantheon SSH key — terminus drush runs over SSH, machine token is not enough (8deb8c2)
+* surface drush uli stderr on failure, curl --max-time 30, job timeout-minutes 10 (227b6a5)
+
+### Documentation
+
+* add /admin/structure/menu to recommended smoke routes (08b6c01)
+
 # Release 4.5.0 (2026-08-19)
 
 ### Features
