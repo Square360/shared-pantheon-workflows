@@ -20,7 +20,7 @@ runs:
         TERMINUS_VERSION: ${{ inputs.terminus_version }}
       run: |
         echo "Installing Terminus ${TERMINUS_VERSION}"
-        curl -fsSL "https://github.com/pantheon-systems/terminus/releases/download/${TERMINUS_VERSION}/terminus.phar" -o /usr/local/bin/terminus
+        curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 "https://github.com/pantheon-systems/terminus/releases/download/${TERMINUS_VERSION}/terminus.phar" -o /usr/local/bin/terminus
         chmod +x /usr/local/bin/terminus
         terminus --version
         terminus auth:login --machine-token="$TERMINUS_MACHINE_TOKEN"
