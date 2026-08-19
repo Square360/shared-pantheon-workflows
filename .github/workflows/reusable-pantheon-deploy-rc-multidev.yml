@@ -37,6 +37,11 @@ on:
         required: false
         type: boolean
         default: false
+      run_route_smoke:
+        description: 'Run route-smoke on the RC before the security scan. The RC is the first build of the merged aggregate — individual PR multidevs only prove each branch alone — so this defaults on. Set false only for repos whose route inventory cannot be made reliable.'
+        required: false
+        type: boolean
+        default: true
     secrets:
       OP_SERVICE_ACCOUNT_TOKEN:
         required: true
@@ -160,9 +165,33 @@ jobs:
             echo "error_message=RC multidev deployment failed at an unknown step." >> $GITHUB_OUTPUT
           fi
 
+  route_smoke:
+    name: Route Smoke (aggregate gate)
+    # The RC is the first build where the merged combination of this cycle's
+    # PRs exists — each PR multidev only proved its own branch against develop
+    # as of its build. Route-smoke here certifies the AGGREGATE serves its key
+    # routes before the security scan spends minutes crawling it: a broken RC
+    # fails fast with one clear signal instead of a wall of ZAP noise.
+    # Self-skips (visible notice, green) when the consuming repo has no
+    # .github/smoke-routes.txt.
+    if: ${{ inputs.run_route_smoke }}
+    needs: deploy_rc_multidev
+    uses: Square360/shared-workflows/.github/workflows/reusable-route-smoke.yml@84b7c43eb066c40ae5822323e5d22b193268f903  # v4.6.0
+    with:
+      pantheon_site: ${{ inputs.pantheon_site }}
+      target_env: ${{ needs.deploy_rc_multidev.outputs.target_env }}
+      slack_channel: ${{ inputs.slack_channel }}
+    secrets:
+      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+
   security_scan:
     name: Security Scan (mandatory on rc-*)
-    needs: deploy_rc_multidev
+    # Gated on route_smoke: ZAP against a site whose routes are 500ing produces
+    # misleading findings — the gate keeps the scan's signal trustworthy. Still
+    # runs when route_smoke is disabled via run_route_smoke: false (skipped
+    # counts as pass); never runs if route_smoke actually failed.
+    needs: [deploy_rc_multidev, route_smoke]
+    if: ${{ !cancelled() && needs.deploy_rc_multidev.result == 'success' && (needs.route_smoke.result == 'success' || needs.route_smoke.result == 'skipped') }}
     # The security workflow detects rc-* internally and runs unconditionally
     # in strict mode (fails on any High-severity finding). No force_run needed.
     uses: Square360/shared-workflows/.github/workflows/reusable-pantheon-security-scan.yml@4342823f58612cc70fba04424df7d78758493141  # v4.3.0
