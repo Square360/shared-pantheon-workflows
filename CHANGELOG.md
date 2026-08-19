@@ -1,3 +1,13 @@
+# Release 4.5.0 (2026-08-19)
+
+### Features
+
+* reusable PHP quality workflow — plugin class-load check + custom unit tests (87f266d)
+
+### Bug Fixes
+
+* block-scalar the skip notice — colon-space in a plain run scalar is a YAML syntax error (cd9e741)
+
 # Release 4.4.3 (2026-08-18)
 
 ### Bug Fixes
