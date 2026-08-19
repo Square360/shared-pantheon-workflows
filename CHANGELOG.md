@@ -1,3 +1,9 @@
+# Release 4.7.0 (2026-08-19)
+
+### Features
+
+* rc: route-smoke gates the RC security scan (bc20977)
+
 # Release 4.6.0 (2026-08-19)
 
 ### Features
