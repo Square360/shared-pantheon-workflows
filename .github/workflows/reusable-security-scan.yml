@@ -161,8 +161,8 @@ jobs:
       env:
         TERMINUS_MACHINE_TOKEN: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
       run: |
-        TERMINUS_VERSION=$(curl -s https://api.github.com/repos/pantheon-systems/terminus/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
-        curl -fsSL "https://github.com/pantheon-systems/terminus/releases/download/${TERMINUS_VERSION}/terminus.phar" \
+        TERMINUS_VERSION=$(curl -s --retry 5 --retry-all-errors --retry-delay 3 https://api.github.com/repos/pantheon-systems/terminus/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+        curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 "https://github.com/pantheon-systems/terminus/releases/download/${TERMINUS_VERSION}/terminus.phar" \
           -o /usr/local/bin/terminus
         chmod +x /usr/local/bin/terminus
         terminus auth:login --machine-token="$TERMINUS_MACHINE_TOKEN"
