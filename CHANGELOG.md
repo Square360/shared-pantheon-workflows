@@ -1,3 +1,9 @@
+# Release 4.8.1 (2026-08-19)
+
+### Bug Fixes
+
+* retry transient network failures on every Terminus fetch (cb3fb43)
+
 # Release 4.8.0 (2026-08-19)
 
 ### Features
