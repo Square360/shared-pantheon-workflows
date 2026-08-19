@@ -1,3 +1,9 @@
+# Release 4.8.0 (2026-08-19)
+
+### Features
+
+* pr-multidev: php-quality + route-smoke built into the PR multidev flow (4315800)
+
 # Release 4.7.0 (2026-08-19)
 
 ### Features
