@@ -36,10 +36,14 @@ name: Reusable Route Smoke (authenticated key-route checks)
 # Missing routes file → visible "skipped" notice, not a failure (same
 # rollout philosophy as reusable-php-quality: repos opt in by adding the file).
 #
-# Auth: `drush uli` mints a one-time login link (uid 1 unless uli_options
-# passes --name/--uid). The link is single-use, masked in logs, and the
-# session cookie lives only in the ephemeral runner. Pass
-# uli_options: '--name=<editor account>' for role-accurate checks.
+# Auth: `drush uli` mints a one-time login link. Account resolution:
+# uli_options input > ROUTE_SMOKE_ULI_OPTIONS repo variable > org variable >
+# uid 1. Hardened sites (uid 1 blocked by design) set the variable once —
+# e.g. "--name=s360sysadmin" at the org level covers the whole fleet, and
+# nested callers (pr-multidev's built-in smoke) inherit it with no caller
+# edits. The link is single-use, masked in logs, and the session cookie
+# lives only in the ephemeral runner. A per-repo variable or uli_options
+# input can name an editor account for role-accurate checks.
 #
 # LIVE is refused, same as the ZAP scan: this workflow logs in with uli —
 # it has no business doing that on production. Call it after the deploy has
@@ -63,7 +67,7 @@ on:
         type: string
         default: '.github/smoke-routes.txt'
       uli_options:
-        description: 'Extra options for drush uli (e.g. --name=smoke_editor for role-accurate checks; empty = uid 1)'
+        description: 'Extra options for drush uli (e.g. --name=smoke_editor for role-accurate checks). Empty = fall back to the ROUTE_SMOKE_ULI_OPTIONS repo/org variable, then uid 1.'
         required: false
         type: string
         default: ''
@@ -136,7 +140,14 @@ jobs:
           SITE: ${{ inputs.pantheon_site }}
           TARGET_ENV: ${{ inputs.target_env }}
           ROUTES_FILE: ${{ inputs.routes_file }}
-          ULI_OPTIONS: ${{ inputs.uli_options }}
+          # uli account resolution: explicit input > caller repo variable >
+          # org variable > empty (uid 1). `vars` resolves against the CALLING
+          # repo (then its org), so hardened sites set
+          # ROUTE_SMOKE_ULI_OPTIONS (e.g. "--name=s360sysadmin") once as a
+          # repo or org variable and every caller — including the nested
+          # call inside pr-multidev, which passes no uli_options — inherits
+          # it with zero caller-file edits.
+          ULI_OPTIONS: ${{ inputs.uli_options != '' && inputs.uli_options || vars.ROUTE_SMOKE_ULI_OPTIONS }}
         run: |
           if [[ "$TARGET_ENV" == "live" ]]; then
             echo "::error::Refusing to run route smoke against LIVE. This workflow logs in via uli — multidev/test only."
@@ -175,7 +186,11 @@ jobs:
           LOGIN_URL=$(terminus drush "$SITE.$TARGET_ENV" -- uli --uri="$TARGET_URL" $ULI_OPTIONS 2>"$ULI_ERR" | grep -oE 'https?://[^[:space:]]+' | tail -1)
           echo "[$SECONDS s] uli returned"
           if [[ -z "$LOGIN_URL" ]]; then
-            echo "::error::drush uli returned no login link (blocked account? bad --name in uli_options?). terminus/drush stderr follows:"
+            if grep -qi "blocked" "$ULI_ERR"; then
+              echo "::error::drush uli account is BLOCKED (hardened site — uid 1 is blocked by design). Fix: set repo or org variable ROUTE_SMOKE_ULI_OPTIONS to an unblocked admin account, e.g. --name=s360sysadmin. No caller-file edit needed."
+            else
+              echo "::error::drush uli returned no login link (bad --name in uli_options? set ROUTE_SMOKE_ULI_OPTIONS repo/org variable for hardened sites). terminus/drush stderr follows:"
+            fi
             sed 's/^/  /' "$ULI_ERR"
             exit 1
           fi
