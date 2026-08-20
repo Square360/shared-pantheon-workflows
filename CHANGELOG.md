@@ -1,3 +1,9 @@
+# Release 4.9.1 (2026-08-20)
+
+### Bug Fixes
+
+* authenticate the Terminus version lookup — unauthenticated api.github.com rate-limits on shared runners (6aa4294)
+
 # Release 4.9.0 (2026-08-19)
 
 ### Features
