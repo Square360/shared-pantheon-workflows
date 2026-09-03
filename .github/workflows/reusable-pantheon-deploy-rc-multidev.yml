@@ -17,8 +17,13 @@ name: Reusable Deploy to RC Multidev (Pantheon)
 #          absent ones are null-safe. The label must be on the PR by merge
 #          time — the RC path runs once, at the closed event.
 #
-# No skip-multidev / docs-only gating here — those are PR-body flags. A push
-# to develop is the post-merge state; the developer can't opt out at this point.
+#   - Skip labels: --docs-only or --skip-multidev on the merged PR (or the
+#          legacy [docs-only] / [skip-multidev] body tags) skips the RC
+#          redeploy. Documentation and developer-tooling PRs change nothing
+#          on Pantheon; they belong in develop, not on the RC multidev.
+#          Labels ride the closed payload, so this is live state at merge
+#          time. The skip is reported to Slack so a mislabeled code PR is
+#          visible rather than a silent stale RC.
 # -----------------------------------------------------------------------------
 
 on:
@@ -54,6 +59,14 @@ defaults:
 jobs:
   deploy_rc_multidev:
     name: Deploy to RC Multidev
+    # Skip when the merged PR is docs or developer tooling (--docs-only /
+    # --skip-multidev labels, or the legacy body tags). Downstream jobs `needs`
+    # this one and skip with it; notify_slack reports the skip.
+    if: >-
+      !contains(github.event.pull_request.labels.*.name, '--docs-only') &&
+      !contains(github.event.pull_request.labels.*.name, '--skip-multidev') &&
+      !contains(github.event.pull_request.body, '[docs-only]') &&
+      !contains(github.event.pull_request.body, '[skip-multidev]')
     permissions:
       deployments: write
       contents: write
@@ -272,6 +285,7 @@ jobs:
             success)   STATUS_EMOJI=":white_check_mark:"; STATUS_COLOR="good";    STATUS_TEXT="Success"   ;;
             failure)   STATUS_EMOJI=":x:";                STATUS_COLOR="danger";  STATUS_TEXT="Failed"    ;;
             cancelled) STATUS_EMOJI=":warning:";          STATUS_COLOR="warning"; STATUS_TEXT="Cancelled" ;;
+            skipped)   STATUS_EMOJI=":fast_forward:";     STATUS_COLOR="#808080"; STATUS_TEXT="Skipped (docs/tooling label)" ;;
             *)         STATUS_EMOJI=":question:";         STATUS_COLOR="#808080"; STATUS_TEXT="Unknown"   ;;
           esac
 
