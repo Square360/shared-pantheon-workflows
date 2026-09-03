@@ -11,6 +11,15 @@ name: Reusable Deploy to RC Multidev (Pantheon)
 #   - ClickUp comment: skipped (rc-multidev triggers are push events, no PR
 #                      context to extract a task ID from)
 #   - Security scan: MANDATORY (force_run=true). The release-candidate gate.
+#   - Composer audit: MANDATORY. `composer audit` on develop's composer.lock,
+#          run on the runner in parallel with the deploy. Fails the workflow on
+#          any drupal/* advisory (Drupal SAs carry no exploitability tiers —
+#          every one is a public how-to) and on other packages at
+#          composer_audit_min_severity or above (default high). The deploy
+#          itself still runs so the RC reflects develop; the red run and the
+#          Slack line are the gate. Escape hatch: composer_audit_gate=false
+#          downgrades to warn-only. pr-* multidevs keep the caller template's
+#          warn-only sticky comment; this is the rc-* teeth (S360-936).
 #   - VRT: opt-in via the --run-vrt PR label (preferred; present on the merged-PR
 #          closed payload), the [run-vrt]/[vrt] PR-body tags, or the merge
 #          commit message on develop (push wiring). All channels are checked;
@@ -47,6 +56,16 @@ on:
         required: false
         type: boolean
         default: true
+      composer_audit_gate:
+        description: 'Fail the workflow on blocking composer advisories (drupal/* at any severity, others at composer_audit_min_severity+). false = warn-only.'
+        required: false
+        type: boolean
+        default: true
+      composer_audit_min_severity:
+        description: 'Minimum severity that blocks for non-drupal packages: low | medium | high | critical.'
+        required: false
+        type: string
+        default: 'high'
     secrets:
       OP_SERVICE_ACCOUNT_TOKEN:
         required: true
@@ -178,6 +197,113 @@ jobs:
             echo "error_message=RC multidev deployment failed at an unknown step." >> $GITHUB_OUTPUT
           fi
 
+  composer_audit:
+    name: Composer security audit (RC gate)
+    # Same skip as the deploy: a docs/tooling merge is not a release candidate.
+    if: >-
+      !contains(github.event.pull_request.labels.*.name, '--docs-only') &&
+      !contains(github.event.pull_request.labels.*.name, '--skip-multidev') &&
+      !contains(github.event.pull_request.body, '[docs-only]') &&
+      !contains(github.event.pull_request.body, '[skip-multidev]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      advisory_count: ${{ steps.audit.outputs.advisory_count }}
+      drupal_count: ${{ steps.audit.outputs.drupal_count }}
+      blocking_count: ${{ steps.audit.outputs.blocking_count }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          coverage: none
+
+      - name: Run composer audit
+        id: audit
+        env:
+          GATE: ${{ inputs.composer_audit_gate }}
+          MIN_SEVERITY: ${{ inputs.composer_audit_min_severity }}
+        run: |
+          set -euo pipefail
+          if [[ ! -f composer.lock ]]; then
+            echo "No composer.lock — nothing to audit."
+            for k in advisory_count drupal_count blocking_count; do echo "$k=0" >> "$GITHUB_OUTPUT"; done
+            exit 0
+          fi
+
+          # composer audit exits non-zero when advisories exist; we decide below.
+          set +e
+          composer audit --format=json --no-interaction > composer-audit.json 2>composer-audit.err
+          AUDIT_EXIT=$?
+          set -e
+          if [[ ! -s composer-audit.json ]]; then
+            echo "::error::composer audit produced no JSON (exit $AUDIT_EXIT)"; cat composer-audit.err; exit 1
+          fi
+
+          # Severity rank; unknown ranks as high so an unlabelled advisory is not
+          # silently waved through. drupal/* blocks at ANY severity.
+          rank() { case "${1,,}" in critical) echo 4;; high) echo 3;; medium|moderate) echo 2;; low) echo 1;; *) echo 3;; esac; }
+          MIN_RANK=$(rank "$MIN_SEVERITY")
+
+          jq -r '[.advisories // {} | to_entries[] as $e | $e.value[]? | . + {package: $e.key}]
+                 | sort_by(.package)[]
+                 | [.package, (.severity // "unknown"), (.advisoryId // .cve // "advisory"), (.link // ""), (.title // "")] | @tsv' \
+            composer-audit.json > advisories.tsv
+
+          ADVISORY_COUNT=$(wc -l < advisories.tsv | tr -d ' ')
+          DRUPAL_COUNT=0; BLOCKING_COUNT=0
+          {
+            echo "### Composer security audit — release candidate"
+            echo ""
+            if [[ "$ADVISORY_COUNT" -eq 0 ]]; then
+              echo "✅ No known security advisories in \`composer.lock\`."
+            else
+              echo "| Blocks | Package | Severity | Advisory | Title |"
+              echo "|:--:|---|---|---|---|"
+            fi
+          } > audit-summary.md
+          while IFS=$'\t' read -r pkg sev adv link title; do
+            [[ -z "$pkg" ]] && continue
+            blocks="no"
+            if [[ "$pkg" == drupal/* ]]; then
+              DRUPAL_COUNT=$((DRUPAL_COUNT+1)); blocks="yes"
+            elif [[ $(rank "$sev") -ge $MIN_RANK ]]; then
+              blocks="yes"
+            fi
+            [[ "$blocks" == "yes" ]] && BLOCKING_COUNT=$((BLOCKING_COUNT+1))
+            mark=$([[ "$blocks" == "yes" ]] && echo "❌" || echo "⚠️")
+            advcell=$adv; [[ -n "$link" ]] && advcell="[$adv]($link)"
+            printf '| %s | %s | %s | %s | %s |\n' "$mark" "$pkg" "$sev" "$advcell" "${title//|/\\|}" >> audit-summary.md
+          done < advisories.tsv
+          {
+            echo ""
+            echo "- Advisories: $ADVISORY_COUNT (drupal/*: $DRUPAL_COUNT, blocking: $BLOCKING_COUNT)"
+            echo "- Rule: drupal/* blocks at any severity; other packages block at **$MIN_SEVERITY** or above."
+          } >> audit-summary.md
+          cat audit-summary.md >> "$GITHUB_STEP_SUMMARY"
+          cat audit-summary.md
+
+          {
+            echo "advisory_count=$ADVISORY_COUNT"
+            echo "drupal_count=$DRUPAL_COUNT"
+            echo "blocking_count=$BLOCKING_COUNT"
+          } >> "$GITHUB_OUTPUT"
+
+          if [[ "$BLOCKING_COUNT" -gt 0 ]]; then
+            if [[ "$GATE" == "true" ]]; then
+              echo "::error::$BLOCKING_COUNT blocking security advisor(y/ies) in composer.lock — release candidate gate failed"
+              exit 1
+            fi
+            echo "::warning::$BLOCKING_COUNT blocking advisor(y/ies) — composer_audit_gate=false, warn-only"
+          fi
+
   route_smoke:
     name: Route Smoke (aggregate gate)
     # The RC is the first build where the merged combination of this cycle's
@@ -247,7 +373,7 @@ jobs:
 
   notify_slack:
     name: Notify Slack
-    needs: deploy_rc_multidev
+    needs: [deploy_rc_multidev, composer_audit]
     if: ${{ always() && inputs.slack_channel }}
     runs-on: ubuntu-latest
     steps:
@@ -268,6 +394,10 @@ jobs:
           SLACK_BOT_TOKEN: ${{ env.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL: ${{ inputs.slack_channel }}
           DEPLOY_RESULT: ${{ needs.deploy_rc_multidev.result }}
+          AUDIT_RESULT: ${{ needs.composer_audit.result }}
+          AUDIT_ADVISORIES: ${{ needs.composer_audit.outputs.advisory_count }}
+          AUDIT_BLOCKING: ${{ needs.composer_audit.outputs.blocking_count }}
+          AUDIT_DRUPAL: ${{ needs.composer_audit.outputs.drupal_count }}
           MULTIDEV_URL: ${{ needs.deploy_rc_multidev.outputs.multidev_url }}
           TARGET_ENV: ${{ needs.deploy_rc_multidev.outputs.target_env }}
           FAILED_STEP: ${{ needs.deploy_rc_multidev.outputs.failed_step }}
@@ -294,6 +424,19 @@ jobs:
             ENV_URL_FIELD=",{\"title\": \"RC Multidev URL\", \"value\": \"<${MULTIDEV_URL}|${MULTIDEV_URL}>\", \"short\": false}"
           fi
 
+          AUDIT_FIELD=""
+          case "$AUDIT_RESULT" in
+            success)
+              if [[ "${AUDIT_ADVISORIES:-0}" -gt 0 ]]; then
+                AUDIT_FIELD=",{\"title\": \"Composer audit\", \"value\": \":warning: ${AUDIT_ADVISORIES} advisor(y/ies), none blocking\", \"short\": true}"
+              else
+                AUDIT_FIELD=",{\"title\": \"Composer audit\", \"value\": \":white_check_mark: clean\", \"short\": true}"
+              fi ;;
+            failure)
+              AUDIT_FIELD=",{\"title\": \"Composer audit\", \"value\": \":x: ${AUDIT_BLOCKING:-?} blocking advisor(y/ies) (drupal/*: ${AUDIT_DRUPAL:-?}) — RC gate failed\", \"short\": true}"
+              STATUS_COLOR="danger"; STATUS_TEXT="${STATUS_TEXT} — advisory gate failed" ;;
+          esac
+
           ERROR_FIELD=""
           if [[ "$DEPLOY_RESULT" == "failure" && -n "$FAILED_STEP" && -n "$ERROR_MESSAGE" ]]; then
             FAILED_STEP_ESCAPED=$(printf '%s' "$FAILED_STEP" | jq -Rs .)
@@ -316,6 +459,7 @@ jobs:
                     {\"title\": \"Status\", \"value\": \"${STATUS_TEXT}\", \"short\": true},
                     {\"title\": \"Workflow\", \"value\": \"<https://github.com/${REPO}/actions/runs/${RUN_ID}|View Workflow>\", \"short\": false}
                     ${ENV_URL_FIELD}
+                    ${AUDIT_FIELD}
                     ${ERROR_FIELD}
                   ],
                   \"footer\": \"GitHub Actions\",
