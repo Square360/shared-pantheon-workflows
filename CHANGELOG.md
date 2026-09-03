@@ -1,3 +1,9 @@
+# Release 4.10.1 (2026-09-03)
+
+### Bug Fixes
+
+* rc-multidev: audit composer.lock with --locked — gate job has no vendor/ (e41b57e)
+
 # Release 4.10.0 (2026-09-03)
 
 ### Features
