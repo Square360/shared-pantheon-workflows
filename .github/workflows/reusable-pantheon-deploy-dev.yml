@@ -17,6 +17,15 @@ name: Reusable Deploy to Pantheon DEV
 # PR-title flag support is delegated to pantheon-post-deploy-drush:
 #   [verbose]  — pass -v to drush deploy
 #
+# Skip labels: when the merged PR carries --docs-only or --skip-multidev (or
+#   the legacy [docs-only] / [skip-multidev] body tags) the deploy is skipped —
+#   documentation and developer tooling change nothing on Pantheon.
+#   One override: if semantic-release just published a version (master's tip
+#   is a chore(release) commit newer than the PR's merge commit), deploy
+#   anyway. A release always reaches DEV, whatever the labels say. The
+#   skip_gate job makes that call after semantic_release has run.
+#   workflow_dispatch runs have no PR and never skip.
+#
 # v4: secrets loaded from 1Password via OP_SERVICE_ACCOUNT_TOKEN.
 #     The only GitHub secret required is OP_SERVICE_ACCOUNT_TOKEN (org-level).
 #     All other credentials (Pantheon, Slack) are resolved at runtime from
@@ -66,11 +75,50 @@ jobs:
     secrets:
       OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
 
-  deploy_to_pantheon_dev:
-    name: Deploy to Pantheon DEV
+  skip_gate:
+    name: Skip-label gate
     needs: semantic_release
     # Run even when semantic_release is skipped (run_semantic_release=false).
     if: ${{ always() && (needs.semantic_release.result == 'success' || needs.semantic_release.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    outputs:
+      deploy: ${{ steps.decide.outputs.deploy }}
+      reason: ${{ steps.decide.outputs.reason }}
+    steps:
+      - name: Checkout target branch tip (after semantic-release)
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.ref || github.ref }}
+          fetch-depth: 2
+      - name: Decide whether to deploy
+        id: decide
+        env:
+          SKIP_LABEL: ${{ contains(github.event.pull_request.labels.*.name, '--docs-only') || contains(github.event.pull_request.labels.*.name, '--skip-multidev') || contains(github.event.pull_request.body, '[docs-only]') || contains(github.event.pull_request.body, '[skip-multidev]') }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          deploy=true
+          reason="deployable change"
+          if [[ "$SKIP_LABEL" == "true" ]]; then
+            deploy=false
+            reason="skip label on the merged PR and semantic-release published nothing"
+            HEAD_SHA=$(git rev-parse HEAD)
+            HEAD_SUBJECT=$(git log -1 --format=%s)
+            # semantic-release commits "chore(release): X.Y.Z [skip ci]" on top of
+            # the merge commit. If that is the tip, a version shipped: deploy.
+            if [[ "$HEAD_SHA" != "$MERGE_SHA" && "$HEAD_SUBJECT" == "chore(release):"* ]]; then
+              deploy=true
+              reason="semantic-release published (${HEAD_SUBJECT%% \[skip ci\]}) — deploying despite the skip label"
+            fi
+          fi
+          echo "deploy=$deploy" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+          echo "skip gate: deploy=$deploy ($reason)"
+
+  deploy_to_pantheon_dev:
+    name: Deploy to Pantheon DEV
+    needs: [semantic_release, skip_gate]
+    # The gate already requires semantic_release to be success or skipped.
+    if: ${{ always() && needs.skip_gate.result == 'success' && needs.skip_gate.outputs.deploy == 'true' }}
     permissions:
       deployments: write
       contents: write
@@ -216,7 +264,7 @@ jobs:
 
   notify_slack:
     name: Notify Slack
-    needs: [semantic_release, deploy_to_pantheon_dev]
+    needs: [semantic_release, deploy_to_pantheon_dev, skip_gate]
     if: ${{ always() && inputs.slack_channel }}
     runs-on: ubuntu-latest
     steps:
@@ -238,6 +286,8 @@ jobs:
           SLACK_CHANNEL: ${{ inputs.slack_channel }}
           SEMANTIC_RESULT: ${{ needs.semantic_release.result }}
           DEPLOY_RESULT: ${{ needs.deploy_to_pantheon_dev.result }}
+          GATE_DEPLOY: ${{ needs.skip_gate.outputs.deploy }}
+          GATE_REASON: ${{ needs.skip_gate.outputs.reason }}
           ENV_URL: ${{ needs.deploy_to_pantheon_dev.outputs.env_url }}
           FAILED_STEP: ${{ needs.deploy_to_pantheon_dev.outputs.failed_step }}
           ERROR_MESSAGE: ${{ needs.deploy_to_pantheon_dev.outputs.error_message }}
@@ -261,6 +311,8 @@ jobs:
             STATUS_EMOJI=":x:";                STATUS_COLOR="danger";  STATUS_TEXT="Failed";    PHASE="Deployment"
           elif [[ "$DEPLOY_RESULT" == "cancelled" ]]; then
             STATUS_EMOJI=":warning:";          STATUS_COLOR="warning"; STATUS_TEXT="Cancelled"; PHASE="Deployment"
+          elif [[ "$DEPLOY_RESULT" == "skipped" && "$GATE_DEPLOY" == "false" ]]; then
+            STATUS_EMOJI=":fast_forward:";     STATUS_COLOR="#808080"; STATUS_TEXT="Skipped (docs/tooling label)"; PHASE="Deployment"
           elif [[ "$SEMANTIC_RESULT" == "cancelled" ]]; then
             STATUS_EMOJI=":warning:";          STATUS_COLOR="warning"; STATUS_TEXT="Cancelled"; PHASE="Semantic Release"
           else
