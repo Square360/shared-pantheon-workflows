@@ -1,3 +1,13 @@
+# Release 4.10.0 (2026-09-03)
+
+### Features
+
+* rc-multidev: composer audit gate — fail the release candidate on drupal/* advisories (a406b2a)
+
+### Bug Fixes
+
+* honour --docs-only / --skip-multidev on RC and DEV deploys; a semantic release always deploys (a90fc47)
+
 # Release 4.9.1 (2026-08-20)
 
 ### Bug Fixes
