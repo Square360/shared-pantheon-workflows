@@ -238,9 +238,11 @@ jobs:
             exit 0
           fi
 
+          # --locked audits composer.lock directly: this job never runs composer install,
+          # so without it composer reports "No installed packages found" and exits 1.
           # composer audit exits non-zero when advisories exist; we decide below.
           set +e
-          composer audit --format=json --no-interaction > composer-audit.json 2>composer-audit.err
+          composer audit --locked --format=json --no-interaction > composer-audit.json 2>composer-audit.err
           AUDIT_EXIT=$?
           set -e
           if [[ ! -s composer-audit.json ]]; then
